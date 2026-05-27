@@ -1,0 +1,21 @@
+{
+  "$schema": "https://example.invalid/schemas/remote-access.schema.json",
+  "description": "Sanitized example only. Real file lives in .my-omo/remote-access/*.local.jsonc.",
+  "hosts": [
+    {
+      "name": "example-host",
+      "kind": "ssh",
+      "hostname": "host.example.invalid",
+      "username": "example-user",
+      "port": 22,
+      "identityFile": ".my-omo/remote-access/example-ssh-key"
+    }
+  ],
+  "tokens": [
+    {
+      "name": "example-service",
+      "provider": "example",
+      "secretFile": ".my-omo/remote-access/example-token"
+    }
+  ]
+}

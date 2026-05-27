@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "installed_at": "2026-01-01T00:00:00+03:00",
+  "machine": "example-machine",
+  "omostack_home": "S:\\FastNeuros\\omo",
+  "base_marker": ".my-omo/omostack-base-install-done",
+  "tools": {
+    "opencode": {
+      "status": "present",
+      "version": "1.0.0-example"
+    },
+    "oh_my_openagent": {
+      "status": "present",
+      "package": "oh-my-openagent"
+    }
+  },
+  "notes": [
+    "Example only. Real install-state.json belongs in ignored .my-omo/."
+  ]
+}
