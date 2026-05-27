@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "example-provider/example-model",
+  "plugin": [
+    "oh-my-openagent"
+  ],
+  "provider": {
+    "example-provider": {
+      "npm": "@ai-sdk/example",
+      "models": {
+        "example-model": {
+          "name": "Example Model"
+        }
+      }
+    }
+  }
+}

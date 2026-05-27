@@ -1,0 +1,17 @@
+/.idea/
+/.vscode/
+
+# Private omostack runtime state. Never track real keys, backups, downloads,
+# local install state, or temporary artifacts from this directory.
+/.my-omo/
+
+# OpenCode / oh-my-openagent local runtime state.
+/.omo/
+
+# Logs, temp files, and OS/editor artifacts.
+*.log
+*.tmp
+*.bak
+Thumbs.db
+.DS_Store
+node_modules/

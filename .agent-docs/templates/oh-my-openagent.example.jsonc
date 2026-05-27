@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json",
+  "agents": {
+    "sisyphus": {
+      "model": "example-provider/example-reasoning-model"
+    }
+  },
+  "categories": {
+    "quick": {
+      "model": "example-provider/example-fast-model"
+    },
+    "writing": {
+      "model": "example-provider/example-writing-model"
+    }
+  },
+  "background_task": {
+    "enabled": true
+  }
+}
