@@ -5,7 +5,7 @@
 # local install state, or temporary artifacts from this directory.
 /.my-omo/
 
-# OpenCode / Oh My Openagent local runtime state.
+# OpenCode / oh-my-openagent local runtime state.
 /.omo/
 
 # Logs, temp files, and OS/editor artifacts.

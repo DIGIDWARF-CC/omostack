@@ -4,7 +4,7 @@ Use this file first when an agent opens this omostack home.
 
 ## 1. Confirm Scope
 
-- This is `S:\FastNeuros\omo`, an omostack home.
+- This folder is an omostack home folder.
 - This is not an application development repo.
 - Public operational knowledge is tracked under `.agent-docs/`.
 - Private runtime state is ignored under `.my-omo/`.
@@ -32,7 +32,7 @@ Classify each issue as `missing`, `present`, or `unhealthy`.
 | Situation | Next file |
 |-----------|-----------|
 | Broken OpenCode | `troubleshooting.md` |
-| Broken Oh My Openagent | `troubleshooting.md` |
+| Broken oh-my-openagent | `troubleshooting.md` |
 | Provider/auth issue | `provider-auth.md` |
 | Config/model issue | `model-and-config-reference.md` |
 | Backup/rollback/cache repair | `setup-directives.md` |

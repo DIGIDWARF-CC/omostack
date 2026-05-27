@@ -1,6 +1,6 @@
 # Agent Instructions - Core Behavior Rules
 
-This file defines how AI agents operate inside this omostack home. The repository is an operations base for OpenCode / Oh My Openagent configuration, diagnostics, repair, backup, rollback, and self-bootstrap on this machine. It is not an application repository.
+This file defines how AI agents operate inside this omostack home. The repository is an operations base for OpenCode / oh-my-openagent configuration, diagnostics, repair, backup, rollback, and self-bootstrap on this machine. It is not an application repository.
 
 ## 0. Folder Ownership
 
@@ -13,7 +13,7 @@ This file defines how AI agents operate inside this omostack home. The repositor
 Rules:
 - Never commit `.my-omo/` or `.omo/`.
 - Never read secret material unless the task explicitly requires it.
-- Back up before modifying private state or global OpenCode / Oh My Openagent files.
+- Back up before modifying private state or global OpenCode / oh-my-openagent files.
 - Prefer dry-run scripts before any repair.
 
 ## 1. Intent Gate
@@ -29,19 +29,7 @@ Before acting, classify the request.
 | "error", "broken", "fails" | Repair | diagnose -> backup if needed -> minimal fix |
 | "refactor", "improve", "clean up" | Open-ended maintenance | assess first -> propose bounded work |
 
-## 2. Agent Selection Matrix
-
-| Task Type | Agent Category | Skills |
-|-----------|---------------|--------|
-| Frontend / UI/UX | `visual-engineering` | `playwright`, `frontend-ui-ux` |
-| Complex logic / algorithms | `ultrabrain` | - |
-| Small config/doc edit | `quick` | - |
-| Architecture / debugging | `oracle` | - |
-| Unfamiliar upstream docs | `librarian` | - |
-| Scaffold exploration | `explore` | - |
-| Documentation / prose | `writing` | - |
-
-## 3. Maintenance Protocol
+## 2. Maintenance Protocol
 
 1. Read `self-bootstrap-checklist.md` and `setup-directives.md`.
 2. Inspect current state with non-destructive commands.
@@ -51,7 +39,7 @@ Before acting, classify the request.
 6. Keep public examples sanitized.
 7. Run `scripts/verify-scaffold.ps1 -Check All` after scaffold edits.
 
-## 4. Verification Checklist
+## 3. Verification Checklist
 
 - `git ls-files -- .my-omo` prints no output.
 - `git status --short -- .my-omo` prints no output.
@@ -59,10 +47,11 @@ Before acting, classify the request.
 - Risky scripts support dry-run behavior and explicit confirmation flags.
 - Documents contain no unfinished draft markers or vague placeholder text.
 
-## 5. Failure Recovery
+## 4. Failure Recovery
 
 1. Stop after repeated failures and inspect root cause.
-2. Do not keep retrying destructive commands.
-3. Restore from backup when a repair changes global config or private state incorrectly.
-4. Consult Oracle/review agents with full failure context for high-risk repairs.
-5. Ask the user before touching secrets, deleting caches, or migrating real private files.
+2. Stop after repeated same-intent attempts that yields no result to rethink and change the approach.
+3. Do not keep retrying destructive commands.
+4. Restore from backup when a repair changes global config or private state incorrectly.
+5. Consult Oracle/review agents with full failure context for high-risk repairs.
+6. Ask the user before touching secrets, deleting caches, or migrating real private files.

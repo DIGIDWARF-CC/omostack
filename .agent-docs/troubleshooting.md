@@ -1,6 +1,6 @@
 # Troubleshooting Reference
 
-This file summarizes common OpenCode / Oh My Openagent failure modes. Prefer the scripts in `scripts/` for local checks and use upstream docs for deeper investigation.
+This file summarizes common OpenCode / oh-my-openagent failure modes. Prefer the scripts in `scripts/` for local checks and use upstream docs for deeper investigation.
 
 ## OpenCode
 
@@ -12,7 +12,7 @@ This file summarizes common OpenCode / Oh My Openagent failure modes. Prefer the
 | Desktop connection failure | unhealthy | Check OpenCode config for custom server settings | Remove or fix server override after backup |
 | Auth provider missing | missing auth | `opencode auth list` | Login through OpenCode provider flow |
 
-## Oh My Openagent
+## oh-my-openagent
 
 | Symptom | Likely State | First Check | Repair Path |
 |---------|--------------|-------------|-------------|
@@ -34,4 +34,4 @@ Ask Oracle/review agents when:
 Source links:
 - OpenCode docs: https://opencode.ai/docs
 - OpenCode troubleshooting: https://dev.opencode.ai/docs/troubleshooting/
-- Oh My Openagent: https://github.com/code-yeongyu/oh-my-openagent
+- oh-my-openagent: https://github.com/code-yeongyu/oh-my-openagent

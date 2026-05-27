@@ -2,7 +2,7 @@
   "schema_version": 1,
   "installed_at": "2026-01-01T00:00:00+03:00",
   "machine": "example-machine",
-  "omostack_home": "S:\\FastNeuros\\omo",
+  "omostack_home": "{drive}:\\{path}\\omo",
   "base_marker": ".my-omo/omostack-base-install-done",
   "tools": {
     "opencode": {

@@ -1,6 +1,6 @@
 # Setup Directives - Omostack Operations Runbook
 
-This is the primary runbook for maintaining the OpenCode / Oh My Openagent omostack home at `S:\FastNeuros\omo`.
+This is the primary runbook for maintaining the OpenCode / oh-my-openagent omostack home.
 
 ## 1. Status Detection
 
@@ -29,7 +29,7 @@ If scaffold verification fails, fix tracked docs/scripts/templates first. If hea
 
 Use `health-check.ps1` for a non-destructive inventory of:
 - OpenCode command availability and version.
-- Oh My Openagent doctor command availability.
+- oh-my-openagent doctor command availability.
 - Node.js and Bun availability.
 - OpenCode auth/config/log/cache path presence.
 - Runtime marker compatibility.
@@ -56,7 +56,7 @@ Run:
 powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/config-audit.ps1 -WhatIf
 ```
 
-If both legacy and current Oh My Openagent config names exist in the same location, prefer the current `oh-my-openagent` name and document the migration before changing files.
+If both legacy and current oh-my-openagent config names exist in the same location, prefer the current `oh-my-openagent` name and document the migration before changing files.
 
 ## 5. Provider Auth Check
 
@@ -67,7 +67,7 @@ opencode auth list
 opencode --print-logs
 ```
 
-Then use Oh My Openagent diagnostics:
+Then use oh-my-openagent diagnostics:
 
 ```powershell
 bunx oh-my-openagent doctor
@@ -127,7 +127,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/verify-s
 
 1. Run health and config audits.
 2. Back up global OpenCode config, auth metadata, and `.my-omo`.
-3. Check upstream release notes when changing OpenCode or Oh My Openagent versions.
+3. Check upstream release notes when changing OpenCode or oh-my-openagent versions.
 4. Upgrade one layer at a time.
 5. Rerun `health-check.ps1 -WhatIf`, `config-audit.ps1 -WhatIf`, and the relevant doctor commands.
 

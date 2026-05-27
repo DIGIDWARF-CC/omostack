@@ -1,6 +1,6 @@
 # .agent-docs - Omostack Home Documentation
 
-This directory is the public, tracked knowledge base for the `S:\FastNeuros\omo` omostack home. Future agents read it to bootstrap, diagnose, repair, and safely maintain OpenCode and Oh My Openagent on this machine.
+This directory is the public, tracked knowledge base for the omostack home. Future agents read it to bootstrap, diagnose, repair, and safely maintain OpenCode and oh-my-openagent on this machine.
 
 This is not application documentation. It is an operations base for the local agent environment.
 
@@ -11,7 +11,7 @@ This is not application documentation. It is an operations base for the local ag
 | New agent orientation | `self-bootstrap-checklist.md` |
 | Main maintenance runbook | `setup-directives.md` |
 | Remote-access policy | `agent-remote-access.md` |
-| OpenCode / Oh My Openagent failures | `troubleshooting.md` |
+| OpenCode / oh-my-openagent failures | `troubleshooting.md` |
 | Provider authentication | `provider-auth.md` |
 | Models and config precedence | `model-and-config-reference.md` |
 | Scripted checks | `scripts/` |
@@ -38,7 +38,7 @@ Gitignore policy:
 | `setup-directives.md` | Main runbook for bootstrap, diagnostics, backup, rollback, cleanup, and repair |
 | `agent-remote-access.md` | Security model and canonical private remote-access folder |
 | `provider-auth.md` | Provider authentication checks and missing/unhealthy classifications |
-| `troubleshooting.md` | Common OpenCode / Oh My Openagent failure modes and repair paths |
+| `troubleshooting.md` | Common OpenCode / oh-my-openagent failure modes and repair paths |
 | `model-and-config-reference.md` | Config locations, precedence, naming, and model-resolution notes |
 | `self-bootstrap-checklist.md` | First-pass checklist for future agents |
 | `agent-worklog.md` | Human-maintained activity log |

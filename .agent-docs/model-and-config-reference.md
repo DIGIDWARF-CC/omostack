@@ -8,7 +8,7 @@ Typical user config:
 
 Project-local config may exist in the opened project, but this repository should not carry real provider secrets.
 
-## Oh My Openagent Config Locations
+## oh-my-openagent Config Locations
 
 Current names:
 - `.opencode/oh-my-openagent.json`
@@ -27,7 +27,9 @@ If legacy and current files exist in the same config directory, treat this as an
 Prefer:
 
 ```json
-"plugin": ["oh-my-openagent"]
+{
+  "plugin": ["oh-my-openagent"]
+}
 ```
 
 Legacy `oh-my-opencode` entries should be migrated only after config backup.
