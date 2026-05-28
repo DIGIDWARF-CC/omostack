@@ -1,4 +1,4 @@
-# Self-Bootstrap Checklist
+# Self-Bootstrap Checklist (WSL/Linux)
 
 Use this file first when an agent opens this omostack home.
 
@@ -9,25 +9,42 @@ Use this file first when an agent opens this omostack home.
 - Public operational knowledge is tracked under `.agent-docs/`.
 - Private runtime state is ignored under `.my-omo/`.
 - OpenCode runtime state is ignored under `.omo/`.
+- **Target environment: WSL/Linux (Bash scripts, XDG paths).**
 
-## 2. Verify Scaffold
+## 2. New Install? Confirm Windows Bootstrap First
+
+If this is a fresh clone of the repository, the human-facing first step is Windows PowerShell:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/verify-scaffold.ps1 -Check All
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-for-human\omo_bootstrap.ps1
+```
+
+Inside WSL, agents only run stage-2:
+
+```bash
+.agent-docs/scripts/OOBE-setup.sh --auto
+```
+
+Proceed to Step 3 after stage-2 completes.
+
+## 3. Verify Scaffold
+
+```bash
+.agent-docs/scripts/check-scaffold.sh --all
 ```
 
 Fix scaffold failures before attempting runtime repair.
 
-## 3. Inspect Runtime Health
+## 4. Inspect Runtime Health
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/health-check.ps1 -WhatIf
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/config-audit.ps1 -WhatIf
+```bash
+.agent-docs/scripts/check-health.sh --dry-run
+.agent-docs/scripts/check-config.sh --dry-run
 ```
 
 Classify each issue as `missing`, `present`, or `unhealthy`.
 
-## 4. Choose Runbook
+## 5. Choose Runbook
 
 | Situation | Next file |
 |-----------|-----------|
@@ -37,9 +54,18 @@ Classify each issue as `missing`, `present`, or `unhealthy`.
 | Config/model issue | `model-and-config-reference.md` |
 | Backup/rollback/cache repair | `setup-directives.md` |
 
-## 5. Before Risky Actions
+## 6. Before Risky Actions
 
-- Run dry-run mode first.
-- Back up private/global state.
+- Run dry-run mode first (`--dry-run`).
+- Back up private/global state with `.agent-docs/scripts/backup-omostack.sh`.
 - Ask the user before reading secrets, deleting caches, or migrating real private files.
 - Record what changed and rerun verification.
+
+## 7. When Agent Encounters Unknown Problem
+
+1. Run `.agent-docs/scripts/diagnostic.sh > .my-omo/diagnostic.json` to capture full state dump.
+2. Read the diagnostic JSON — it contains OS, PATH, tool versions, sanitized config metadata, systemd status, ports.
+3. Cross-reference with `troubleshooting.md` for known fixes.
+4. Apply minimal fix and verify with health check scripts.
+
+This workflow enables even a weak agent to diagnose and resolve issues autonomously.

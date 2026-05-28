@@ -8,6 +8,9 @@
 # OpenCode / oh-my-openagent local runtime state.
 /.omo/
 
+# Human bootstrap runtime state/logs when launched from a repo checkout.
+/bootstrap-for-human/.local/
+
 # Logs, temp files, and OS/editor artifacts.
 *.log
 *.tmp

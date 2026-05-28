@@ -14,7 +14,19 @@ Rules:
 - Never commit `.my-omo/` or `.omo/`.
 - Never read secret material unless the task explicitly requires it.
 - Back up before modifying private state or global OpenCode / oh-my-openagent files.
-- Prefer dry-run scripts before any repair.
+- Prefer dry-run scripts (`--dry-run`) before any repair.
+
+## 0.5 WSL/Linux Environment
+
+This project targets **Windows bootstrap -> WSL/Linux operations**. The only human-facing PowerShell script is `bootstrap-for-human/omo_bootstrap.ps1`; agent maintenance scripts are Bash (`.sh`).
+
+Key paths:
+- Config: `~/.config/opencode/` or `$XDG_CONFIG_HOME/opencode/`
+- Cache: `~/.cache/opencode/` or `$XDG_CACHE_HOME/opencode/`
+- Data: `~/.local/share/opencode/` or `$XDG_DATA_HOME/opencode/`
+- Scripts: `.agent-docs/scripts/*.sh` (bash)
+
+Do not add active maintenance `.ps1` scripts under `.agent-docs/scripts/`. Windows-side bootstrap work belongs only in `bootstrap-for-human/omo_bootstrap.ps1`.
 
 ## 1. Intent Gate
 
@@ -32,18 +44,18 @@ Before acting, classify the request.
 ## 2. Maintenance Protocol
 
 1. Read `self-bootstrap-checklist.md` and `setup-directives.md`.
-2. Inspect current state with non-destructive commands.
+2. Inspect current state with non-destructive commands (`--dry-run`).
 3. Classify tools as `missing`, `present`, or `unhealthy`.
-4. Use `-WhatIf` or dry-run mode before destructive actions.
+4. Use `--dry-run` before destructive actions.
 5. Back up before editing config, auth, cache, or private runtime state.
 6. Keep public examples sanitized.
-7. Run `scripts/verify-scaffold.ps1 -Check All` after scaffold edits.
+7. Run `scripts/check-scaffold.sh --all` after scaffold edits.
 
 ## 3. Verification Checklist
 
 - `git ls-files -- .my-omo` prints no output.
 - `git status --short -- .my-omo` prints no output.
-- `.agent-docs/scripts/verify-scaffold.ps1 -Check All` exits 0.
+- `.agent-docs/scripts/check-scaffold.sh --all` exits 0.
 - Risky scripts support dry-run behavior and explicit confirmation flags.
 - Documents contain no unfinished draft markers or vague placeholder text.
 
@@ -55,3 +67,14 @@ Before acting, classify the request.
 4. Restore from backup when a repair changes global config or private state incorrectly.
 5. Consult Oracle/review agents with full failure context for high-risk repairs.
 6. Ask the user before touching secrets, deleting caches, or migrating real private files.
+
+## 5. Agent Diagnostic Workflow (NEW)
+
+When an agent encounters a problem:
+
+1. Run `.agent-docs/scripts/diagnostic.sh` and save output to `.my-omo/diagnostic.json`.
+2. Read the diagnostic JSON — it contains OS, PATH, tool versions, sanitized config metadata, systemd status, listening ports.
+3. Cross-reference with `troubleshooting.md` for known fixes.
+4. Apply minimal fix, then re-run health check: `.agent-docs/scripts/check-health.sh`.
+
+This workflow lets even a weak agent diagnose and resolve most issues autonomously.

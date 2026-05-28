@@ -1,13 +1,14 @@
 # .agent-docs - Omostack Home Documentation
 
-This directory is the public, tracked knowledge base for the omostack home. Future agents read it to bootstrap, diagnose, repair, and safely maintain OpenCode and oh-my-openagent on this machine.
+This directory is the public, tracked knowledge base for the omostack home — an operations base for OpenCode and oh-my-openagent on **WSL/Linux**. Human OOBE starts from Windows PowerShell in `bootstrap-for-human/omo_bootstrap.ps1`; this folder contains the agent-facing stage-2 docs and scripts.
 
-This is not application documentation. It is an operations base for the local agent environment.
+This is not application documentation. It is an operations base for agent-driven maintenance of the local agent environment.
 
 ## Start Here
 
 | Need | Open |
 |------|------|
+| **New install / OOBE** | `../OOBE.md` and `../bootstrap-for-human/omo_bootstrap.ps1` |
 | New agent orientation | `self-bootstrap-checklist.md` |
 | Main maintenance runbook | `setup-directives.md` |
 | Remote-access policy | `agent-remote-access.md` |
@@ -21,14 +22,14 @@ This is not application documentation. It is an operations base for the local ag
 
 | Role | Path | Tracked? | Description |
 |------|------|----------|-------------|
-| Public docs | `.agent-docs/` | YES | Instructions, runbooks, templates, scripts |
-| Private state | `.my-omo/` | NO | Real keys, backups, downloads, temp files, private install state |
+| Public docs | `.agent-docs/` | YES | Instructions, runbooks, sanitized templates, maintenance scripts |
+| Private runtime state | `.my-omo/` | NO | Real keys, backups, downloads, temp files, private install state |
 | OpenCode runtime | `.omo/` | NO | Plans, evidence, continuation JSON, local execution artifacts |
 
 Gitignore policy:
 - `.my-omo/` is ignored completely.
 - `.omo/` is ignored completely.
-- `.agent-docs/templates/`, `.agent-docs/scripts/`, and `.agent-docs/runbooks/` must remain trackable.
+- `.agent-docs/templates/`, `.agent-docs/scripts/`, and `.agent-docs/recipes/` must remain trackable.
 
 ## Files
 
@@ -48,12 +49,15 @@ Gitignore policy:
 | Path | Description |
 |------|-------------|
 | `templates/` | Sanitized examples only; real values live under ignored private state |
-| `scripts/` | PowerShell 5.1 scripts with dry-run behavior for risky operations |
+| `scripts/` | Bash scripts with dry-run behavior for risky operations |
+| `recipes/` | Interactive troubleshooting menus and multi-step fix workflows |
+
+Windows PowerShell scripts outside `bootstrap-for-human/omo_bootstrap.ps1` are not part of the active OOBE path.
 
 ## Operating Rules
 
 1. Read `self-bootstrap-checklist.md` before changing anything.
-2. Use scripts in `-WhatIf` mode first when the script supports it.
+2. Use scripts in `--dry-run` mode first when the script supports it.
 3. Back up before touching global OpenCode config, caches, auth data, or existing private state.
 4. Do not track placeholders under `.my-omo/`; place sanitized templates under `templates/`.
-5. Run `scripts/verify-scaffold.ps1 -Check All` after scaffold changes.
+5. Run `scripts/check-scaffold.sh --all` after scaffold changes.
