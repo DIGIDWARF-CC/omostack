@@ -10,7 +10,7 @@ Real keys, tokens, endpoint pseudoconfigs, and machine-local connection details 
 .my-omo/remote-access/
 ```
 
-The folder is intentionally not tracked. Do not add `.gitkeep` or tracked placeholders under `.my-omo/`.
+The folder is intentionally not tracked. Do not add .gitkeep or tracked placeholders under .my-omo/.
 
 Sanitized examples belong in:
 
@@ -37,7 +37,7 @@ These filenames are examples only. Real files remain private and ignored.
 
 ## Verification
 
-```powershell
+```bash
 git check-ignore -v .my-omo/remote-access/example.local.jsonc
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/verify-scaffold.ps1 -Check RemoteAccess
+.agent-docs/scripts/check-scaffold.sh --remote-access
 ```

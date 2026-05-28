@@ -1,6 +1,6 @@
-# Setup Directives - Omostack Operations Runbook
+# Setup Directives - Omostack Operations Runbook (WSL/Linux)
 
-This is the primary runbook for maintaining the OpenCode / oh-my-openagent omostack home.
+This is the primary runbook for maintaining the OpenCode / oh-my-openagent omostack home on **WSL/Linux**. Human bootstrap starts on Windows with `bootstrap-for-human/omo_bootstrap.ps1`; this runbook covers stage-2 agent operations inside WSL/Linux.
 
 ## 1. Status Detection
 
@@ -8,7 +8,6 @@ Base install compatibility marker:
 - `.my-omo/omostack-base-install-done` means the base omostack was installed at least once.
 - The marker may be 0 bytes for backward compatibility.
 - Detailed private install state, when available, belongs in ignored `.my-omo/install-state.json`.
-- A sanitized example lives at `.agent-docs/templates/install-state.example.json`.
 
 Tool health classification:
 - `missing`: command or expected file is absent.
@@ -17,43 +16,52 @@ Tool health classification:
 
 ## 2. First Pass for Any Agent
 
+For a fresh machine, confirm the human bootstrap has already run or point the user to:
+
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/verify-scaffold.ps1 -Check All
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/health-check.ps1 -WhatIf
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/config-audit.ps1 -WhatIf
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-for-human\omo_bootstrap.ps1
+```
+
+Then inside WSL:
+
+```bash
+.agent-docs/scripts/OOBE-setup.sh --auto
+.agent-docs/scripts/check-scaffold.sh --all
+.agent-docs/scripts/check-health.sh --dry-run
+.agent-docs/scripts/check-config.sh --dry-run
 ```
 
 If scaffold verification fails, fix tracked docs/scripts/templates first. If health checks report missing or unhealthy runtime tools, diagnose with the relevant section below before changing global config.
 
 ## 3. Health Check
 
-Use `health-check.ps1` for a non-destructive inventory of:
+Use `check-health.sh` for a non-destructive inventory of:
 - OpenCode command availability and version.
-- oh-my-openagent doctor command availability.
+- oh-my-openagent doctor command availability (checks both `oh-my-openagent` binary and `bunx`).
 - Node.js and Bun availability.
-- OpenCode auth/config/log/cache path presence.
+- OpenCode auth/config/log/cache path presence (XDG paths).
 - Runtime marker compatibility.
 
 Run:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/health-check.ps1 -WhatIf
+```bash
+.agent-docs/scripts/check-health.sh --dry-run
 ```
 
 Do not treat `missing` as the same as `unhealthy`. Missing tools need installation or PATH repair; unhealthy tools need config/auth/cache diagnosis.
 
 ## 4. Config Audit
 
-Use `config-audit.ps1` to inspect:
-- `%APPDATA%\opencode\opencode.json` and `.jsonc`.
-- `%APPDATA%\opencode\oh-my-openagent.json` and `.jsonc`.
+Use `check-config.sh` to inspect:
+- `$XDG_CONFIG_HOME/opencode/opencode.json` and `.jsonc`.
+- `$XDG_CONFIG_HOME/opencode/oh-my-openagent.json` and `.jsonc`.
 - legacy `oh-my-opencode` config collision.
 - plugin naming in OpenCode config.
 
 Run:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/config-audit.ps1 -WhatIf
+```bash
+.agent-docs/scripts/check-config.sh --dry-run
 ```
 
 If both legacy and current oh-my-openagent config names exist in the same location, prefer the current `oh-my-openagent` name and document the migration before changing files.
@@ -62,51 +70,69 @@ If both legacy and current oh-my-openagent config names exist in the same locati
 
 Use OpenCode first:
 
-```powershell
+```bash
 opencode auth list
 opencode --print-logs
 ```
 
 Then use oh-my-openagent diagnostics:
 
-```powershell
-bunx oh-my-openagent doctor
-bunx oh-my-opencode doctor --verbose
+```bash
+oh-my-openagent doctor
 ```
 
 See `provider-auth.md` for provider-specific missing/unhealthy interpretation.
 
-## 6. Backup and Rollback
+## 6. Global Installation (WSL) — CRITICAL
+
+**oh-my-openagent MUST be globally installed via npm for full functionality:**
+
+```bash
+npm install -g oh-my-openagent
+npm install -g @code-yeongyu/comment-checker
+```
+
+Verify:
+```bash
+which oh-my-openagent   # should return /usr/bin/oh-my-openagent or similar path
+oh-my-openagent doctor  # should pass without missing binary errors
+```
+
+**Why global?** The `doctor` command, TUI installer, and systemd integration all require the binary to be in PATH. Using `npx oh-my-openagent` works for one-off commands but breaks when other tools (like OpenCode itself) try to invoke it.
+
+If `bunx` is not available globally, the direct `oh-my-openagent` binary still works — global installation ensures both paths are covered.
+
+## 7. Backup and Rollback
 
 Before cache repair, config rewrite, private-folder migration, auth cleanup, or upgrade:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/backup-omostack.ps1 -Destination .my-omo/backups/manual-YYYYMMDD-HHMMSS -WhatIf
+```bash
+.agent-docs/scripts/backup-omostack.sh --destination .my-omo/backups/manual-$(date +%Y%m%d-%H%M%S) --dry-run
 ```
 
-Then rerun without `-WhatIf` only when the user approves the target. Rollback means restoring the backed-up files or directories, then rerunning health and config audits.
+Then rerun without `--dry-run` only when the user approves the target. Rollback means restoring the backed-up files or directories, then rerunning health and config audits.
 
-## 7. Cache Repair
+## 8. Cache Repair
 
 Use cache repair only for provider package corruption, `ProviderInitError`, stale provider packages, or known cache-related startup failures.
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/repair-opencode-cache.ps1 -WhatIf
+```bash
+.agent-docs/scripts/repair-cache.sh --dry-run
 ```
 
-Actual cache deletion requires `-ConfirmRepair`. Back up first if logs or cache contents are needed for diagnosis.
+Actual cache deletion requires `--ConfirmRepair`. Back up first if logs or cache contents are needed for diagnosis.
 
-## 8. Temp Cleanup
+## 9. Temp Cleanup
 
 Only clean ignored temp/runtime locations:
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/cleanup-temp.ps1 -WhatIf -OlderThanDays 7
+```bash
+.agent-docs/scripts/cleanup-temp.sh --dry-run --OlderThanDays 7
 ```
 
 This must not touch `.my-omo/remote-access/`, `.my-omo/backups/`, auth files, or global configs.
 
-## 9. Remote-Access Initialization
+## 10. Remote-Access Initialization
 
 Canonical private folder: `.my-omo/remote-access/`.
 
@@ -118,20 +144,20 @@ Procedure:
 
 Use:
 
-```powershell
+```bash
 git check-ignore -v .my-omo/remote-access/example.local.jsonc
-powershell -NoProfile -ExecutionPolicy Bypass -File .agent-docs/scripts/verify-scaffold.ps1 -Check RemoteAccess
+.agent-docs/scripts/check-scaffold.sh --remote-access
 ```
 
-## 10. Upgrade Flow
+## 11. Upgrade Flow
 
-1. Run health and config audits.
+1. Run health and config audits (`check-health.sh`, `check-config.sh`).
 2. Back up global OpenCode config, auth metadata, and `.my-omo`.
 3. Check upstream release notes when changing OpenCode or oh-my-openagent versions.
 4. Upgrade one layer at a time.
-5. Rerun `health-check.ps1 -WhatIf`, `config-audit.ps1 -WhatIf`, and the relevant doctor commands.
+5. Rerun `check-health.sh --dry-run`, `check-config.sh --dry-run`, and the relevant doctor commands.
 
-## 11. Escalation
+## 12. Escalation
 
 Consult Oracle/review agents when:
 - a repair would delete or rewrite global config;

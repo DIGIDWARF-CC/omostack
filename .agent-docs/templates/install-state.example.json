@@ -1,20 +1,45 @@
 {
   "schema_version": 1,
   "installed_at": "2026-01-01T00:00:00+03:00",
+  "os": {
+    "type": "wsl-linux",
+    "distro": "Ubuntu-24.04",
+    "kernel": "5.15.0-wsl"
+  },
   "machine": "example-machine",
-  "omostack_home": "{drive}:\\{path}\\omo",
+  "omostack_home": "/mnt/s/FastNeuros/omo",
   "base_marker": ".my-omo/omostack-base-install-done",
+  "global_install": true,
   "tools": {
     "opencode": {
       "status": "present",
-      "version": "1.0.0-example"
+      "version": "1.15.11",
+      "path": "/usr/local/bin/opencode",
+      "in_path": true
     },
     "oh_my_openagent": {
       "status": "present",
-      "package": "oh-my-openagent"
+      "version": "4.5.1",
+      "package": "oh-my-openagent",
+      "global_install": true,
+      "path": "/usr/bin/oh-my-openagent",
+      "in_path": true
+    },
+    "comment_checker": {
+      "status": "present",
+      "package": "@code-yeongyu/comment-checker",
+      "global_install": true,
+      "in_path": true
     }
   },
+  "config": {
+    "opencode_jsonc": "~/.config/opencode/opencode.jsonc",
+    "oh_my_openagent_json": "~/.config/opencode/oh-my-openagent.json",
+    "tui_json": "~/.config/opencode/tui.json",
+    "systemd_service": "/etc/systemd/system/opencode-serve.service"
+  },
   "notes": [
-    "Example only. Real install-state.json belongs in ignored .my-omo/."
+    "Example only. Real install-state.json belongs in ignored .my-omo/.",
+    "global_install: true means oh-my-openagent is installed via npm -g (required for full functionality)."
   ]
 }

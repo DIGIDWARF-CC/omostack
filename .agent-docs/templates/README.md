@@ -12,4 +12,17 @@ Files:
 - `remote-access.example.jsonc`: local endpoint pseudoconfig shape.
 - `opencode-global.example.jsonc`: global OpenCode config shape.
 - `oh-my-openagent.example.jsonc`: oh-my-openagent config shape.
-- `install-state.example.json`: private install-state schema example.
+- `install-state.example.json`: private install-state schema example (includes WSL/global_install fields).
+
+## Scripts Directory
+
+| Script | Purpose |
+|--------|---------|
+| `OOBE-setup.sh` | Stage-2 WSL/Linux agent setup after Windows bootstrap |
+| `check-health.sh` | Non-destructive tool availability check (`--dry-run`) |
+| `check-config.sh` | Config collision and plugin naming audit (`--dry-run`) |
+| `check-scaffold.sh` | Repo structure verification (`--all` or specific checks) |
+| `backup-omostack.sh` | Backup private state + global configs |
+| `repair-cache.sh` | Clean OpenCode provider cache (`--ConfirmRepair`) |
+| `cleanup-temp.sh` | Remove old temp files from ignored dirs |
+| `diagnostic.sh` | Sanitized JSON diagnostic for agent troubleshooting |
