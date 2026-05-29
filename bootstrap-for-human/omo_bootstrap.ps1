@@ -1,5 +1,6 @@
 ﻿<# 
 OmO Bootstrap для человека в Windows.
+WSL работает от root — никаких промежуточных пользователей.
 Совместим с PowerShell 5.1, умеет продолжать установку и безопасен для повторного запуска.
 #>
 [CmdletBinding()]
@@ -245,24 +246,6 @@ function Convert-ToWslPath {
     $drive = $matches[1].ToLowerInvariant()
     $rest = $matches[2] -replace "\\", "/"
     return "/mnt/$drive/$rest"
-}
-
-function Get-SanitizedWindowsUser {
-    $name = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    if ($name -match "\\") {
-        $name = ($name -split "\\")[-1]
-    }
-    if ([string]::IsNullOrWhiteSpace($name)) {
-        $name = $env:USERNAME
-    }
-    $user = $name.ToLowerInvariant()
-    $user = $user -replace "[^a-z0-9_-]", "-"
-    $user = $user.Trim("-_")
-    if ([string]::IsNullOrWhiteSpace($user)) { $user = "omo" }
-    if ($user -match "^[0-9]") { $user = "u$user" }
-    if ($user.Length -gt 32) { $user = $user.Substring(0, 32).Trim("-_") }
-    if ([string]::IsNullOrWhiteSpace($user)) { $user = "omo" }
-    return $user
 }
 
 function Get-DefaultTargetPath {
@@ -616,18 +599,24 @@ function Ensure-WSLBase {
 
         Write-Log "После включения: WSL=$wslStateAfter, VMP=$vmStateAfter"
 
+        # ОБЯЗАТЕЛЬНО обновляем wsl.exe и ядро WSL2 ПЕРЕЗ любой работой.
+        # Без этого бинарь старый — даже wsl --version может вернуть help-текст.
+        if (-not $PlanOnly) {
+            Invoke-WslUpdate
+        }
+
         # Если хоть одна фича не Enabled — нужен ребут
         if ($wslStateAfter -ne 'Enabled' -or $vmStateAfter -ne 'Enabled') {
             Write-Log "WSL компоненты включены, но требуют перезагрузку (CBS defer)."
+            # CBS defer: ставим Ubuntu напрямую с --no-launch.
+            # wsl сам дождётся ребута и поднимет VM.
             if (-not $PlanOnly) {
-                # Запускаем wsl --install — он сам доделает оставшиеся фичи после ребута
-                Write-Log "Запуск wsl --install для завершения активации..."
-                Invoke-Native "wsl.exe" @("--install")
+                Invoke-WslInstallDistroNoLaunch
             } else {
-                Write-Host "[план] wsl --install (завершит активацию фич после ребута)"
+                Write-Host "[план] wsl --install -d Ubuntu --no-launch"
             }
         } else {
-            # Обе фичи Enabled — пробуем wsl сразу
+            # Обе фичи Enabled — пробуем wsl сразу (после update бинарь должен работать)
             Start-Sleep -Seconds 3
             try {
                 & wsl.exe --version *> $null 2>&1
@@ -639,7 +628,7 @@ function Ensure-WSLBase {
         }
     } else {
         # wsl.exe есть, но не работает (exit code != 0 — вероятно WSL_E_WSL_OPTIONAL_COMPONENT_REQUIRED)
-        # Это значит фичи включены но не активированы до ребута
+        # Это значит фичи включены но не активированы до ребута.
         Write-Log "wsl.exe найден но не работает. Активируем компоненты..."
 
         # Включаем обе фичи на всякий случай (не повредит если уже Enabled)
@@ -650,24 +639,174 @@ function Ensure-WSLBase {
             Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart | Out-Null
         } -PlanOnly:$PlanOnly
 
+        # ОБЯЗАТЕЛЬНО обновляем wsl.exe и ядро WSL2 ПЕРЕЗ любой работой.
+        if (-not $PlanOnly) {
+            Invoke-WslUpdate
+        }
+
+        # После DISM-включения фичей CBS defer может не активировать их до ребута.
+        # wsl --install без аргументов ждёт UI-промпт и зависает.
+        # Best practice: после включения обеих фич — сразу ставить дистрибут с --no-launch.
         Start-Sleep -Seconds 3
         try {
             & wsl.exe --version *> $null 2>&1
             if ($LASTEXITCODE -eq 0) {
                 Write-Log "WSL компоненты активированы без перезагрузки."
-                return
+
+                # WSL работает — ставим Ubuntu напрямую (без UI, неблокирующий)
+                if (-not $PlanOnly) {
+                    Invoke-WslInstallDistroNoLaunch
+                } else {
+                    Write-Host "[план] wsl --install -d Ubuntu --no-launch"
+                }
+            } else {
+                # CBS defer: фичи включены но не активированы.
+                # Ставим Ubuntu напрямую — wsl сам дождётся ребута и поднимет VM.
+                Write-Log "WSL ещё не активен (CBS defer), ставим Ubuntu напрямую..."
+                if (-not $PlanOnly) {
+                    Invoke-WslInstallDistroNoLaunch
+                } else {
+                    Write-Host "[план] wsl --install -d Ubuntu --no-launch"
+                }
             }
         } catch {}
 
-        # Fallback: wsl --install доделает остальное
-        if (-not $PlanOnly) {
-            Invoke-Native "wsl.exe" @("--install")
-        } else {
-            Write-Host "[план] wsl --install (завершит активацию фич после ребута)"
+        # Если wsl.exe вообще не обнаружился после DISM — нужен ребут для активации VMP.
+        $hasWslAfter = Get-Command wsl.exe -ErrorAction SilentlyContinue
+        if (-not $hasWslAfter) {
+            Write-Log "wsl.exe появился только после ребута (VMP активирован)."
+            if (-not $PlanOnly) {
+                # Запускаем wsl --install с таймаутом — он дождётся CBS defer и поставит Ubuntu.
+                Invoke-WslInstallWithTimeout
+            } else {
+                Write-Host "[план] wsl --install (дождётся ребута и установит Ubuntu)"
+            }
         }
     }
 
     # Если PlanOnly — на этом хватит, дальше пойдёт Ensure-Ubuntu
+}
+
+# Устанавливает Ubuntu через wsl --install -d Ubuntu --no-launch.
+# Ключевой флаг --no-launch: не открывает UI-окно первого запуска (которое ждёт ввода имени/пароля и блокирует процесс).
+# Это стандартный паттерн для unattended WSL-установки.
+function Invoke-WslInstallDistroNoLaunch {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "wsl.exe"
+    $psi.Arguments = "--install", "-d", $DistroName, "--no-launch"
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    Write-Log "[wsl --install -d Ubuntu --no-launch] Запускаю..."
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while (-not $p.HasExited) {
+        $elapsed = $sw.Elapsed.ToString("hh\:mm\:ss")
+        Write-Progress -Activity "OmO Bootstrap" -Status "wsl --install -d Ubuntu --no-launch прошло $elapsed" -PercentComplete -1
+        Start-Sleep -Seconds 1
+    }
+    $sw.Stop()
+    $stdout = $p.StandardOutput.ReadToEnd()
+    $stderr = $p.StandardError.ReadToEnd()
+    Write-Progress -Activity "OmO Bootstrap" -Completed
+    if ($stdout) { Write-Log "[wsl --install] stdout:`n$stdout" }
+    if ($stderr) { Write-Log "[wsl --install] stderr:`n$stderr" }
+    Write-Log ("wsl --install завершился за {0} с exit code {1}" -f $sw.Elapsed.ToString("hh\:mm\:ss"), $p.ExitCode)
+    if ($p.ExitCode -ne 0) {
+        throw "wsl.exe --install -d Ubuntu --no-launch вернул код $($p.ExitCode). stdout:`n$stdout`nstderr:`n$stderr"
+    }
+}
+
+# Запускает wsl --install с таймаутом 2 минуты.
+# Используется когда wsl.exe появился только после ребута VMP — нужно дождаться CBS defer.
+function Invoke-WslInstallWithTimeout {
+    $timeoutSec = 120
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "wsl.exe"
+    $psi.Arguments = "--install", "-d", $DistroName, "--no-launch"
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    Write-Log "[wsl --install с таймаутом ${timeoutSec}с] Запускаю..."
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $finished = $p.WaitForExit($timeoutSec * 1000)
+    if (-not $finished) {
+        Write-Log "wsl --install не завершился за ${timeoutSec}с — завершаю принудительно."
+        if (-not $p.HasExited) { $p.Kill() }
+        $stdout = $p.StandardOutput.ReadToEnd()
+        $stderr = $p.StandardError.ReadToEnd()
+        Write-Log "[wsl --install] stdout:`n$stdout"
+        Write-Log "[wsl --install] stderr:`n$stderr"
+    } else {
+        $stdout = $p.StandardOutput.ReadToEnd()
+        $stderr = $p.StandardError.ReadToEnd()
+        if ($stdout) { Write-Log "[wsl --install] stdout:`n$stdout" }
+        if ($stderr) { Write-Log "[wsl --install] stderr:`n$stderr" }
+    }
+}
+
+# Обновляет wsl.exe и ядро WSL2 через wsl --update.
+# КРИТИЧНО: без этого шага все команды wsl падают на help-текст — бинарь старый/пустой.
+# Microsoft рекомендует вызывать это сразу после включения фичей DISM.
+function Invoke-WslUpdate {
+    $timeoutSec = 180 # до 3 минут — скачивает ядро WSL2 с серверов Microsoft
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "wsl.exe"
+    $psi.Arguments = "--update"
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    Write-Log "[wsl --update] Запускаю обновление wsl.exe и ядра WSL2..."
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $finished = $p.WaitForExit($timeoutSec * 1000)
+    if (-not $finished) {
+        Write-Log "wsl --update не завершился за ${timeoutSec}с — завершаю принудительно."
+        if (-not $p.HasExited) { $p.Kill() }
+        $stdout = $p.StandardOutput.ReadToEnd()
+        $stderr = $p.StandardError.ReadToEnd()
+        Write-Log "[wsl --update] stdout:`n$stdout"
+        Write-Log "[wsl --update] stderr:`n$stderr"
+    } else {
+        $stdout = $p.StandardOutput.ReadToEnd()
+        $stderr = $p.StandardError.ReadToEnd()
+        if ($stdout) { Write-Log "[wsl --update] stdout:`n$stdout" }
+        if ($stderr) { Write-Log "[wsl --update] stderr:`n$stderr" }
+    }
+    Write-Log ("wsl --update завершился с exit code {0}" -f $p.ExitCode)
+}
+
+function Invoke-WslInstallWithOutput {
+    # Запускает wsl --install с захватом stdout/stderr для диагностики.
+    # Это критично: при ошибке exit code -1 wsl.exe пишет причину в stderr,
+    # а Invoke-Native (без Redirect) показывает только exit code без вывода.
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "wsl.exe"
+    $psi.Arguments = "--install"
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    Write-Log "[wsl --install] Запускаю с захватом вывода..."
+    $p = [System.Diagnostics.Process]::Start($psi)
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while (-not $p.HasExited) {
+        $elapsed = $sw.Elapsed.ToString("hh\:mm\:ss")
+        Write-Progress -Activity "OmO Bootstrap" -Status "wsl --install прошло $elapsed" -PercentComplete -1
+        Start-Sleep -Seconds 1
+    }
+    $sw.Stop()
+    $stdout = $p.StandardOutput.ReadToEnd()
+    $stderr = $p.StandardError.ReadToEnd()
+    Write-Progress -Activity "OmO Bootstrap" -Completed
+    if ($stdout) { Write-Log "[wsl --install] stdout:`n$stdout" }
+    if ($stderr) { Write-Log "[wsl --install] stderr:`n$stderr" }
+    Write-Log ("wsl --install завершился за {0} с exit code {1}" -f $sw.Elapsed.ToString("hh\:mm\:ss"), $p.ExitCode)
+    if ($p.ExitCode -ne 0) {
+        throw "wsl.exe --install вернул код $($p.ExitCode). stdout:`n$stdout`nstderr:`n$stderr"
+    }
 }
 
 function Test-WSLReady {
@@ -839,34 +978,14 @@ function Invoke-WslRoot {
     Invoke-WslScript -User "root" -Script $Script
 }
 
-function Invoke-WslUser {
-    param([string]$User, [string]$Script)
-    Invoke-WslScript -User $User -Script $Script
-}
-
-function Ensure-WslDefaultUser {
-    param([switch]$PlanOnly)
-    $unixUser = Get-SanitizedWindowsUser
-    $null = Invoke-Step "Создать default Unix user '$unixUser' из Windows whoami и подготовить sudo без пароля" {
-        $cmd = @"
-set -e
-unix_user='$unixUser'
-if ! id -u "`$unix_user" >/dev/null 2>&1; then
-    useradd -m -s /bin/bash -G sudo "`$unix_user"
-fi
-passwd -d "`$unix_user" >/dev/null 2>&1 || true
-printf '%s ALL=(ALL) NOPASSWD:ALL\n' "`$unix_user" > /etc/sudoers.d/90-omo-bootstrap-user
-chmod 440 /etc/sudoers.d/90-omo-bootstrap-user
-"@
-        Invoke-WslRoot $cmd
-    } -PlanOnly:$PlanOnly
-    return $unixUser
-}
+# Убран Ensure-WslDefaultUser — WSL теперь всегда работает от root,
+# пользователь root существует по умолчанию в любом Ubuntu-дистрибуте.
 
 function Ensure-UbuntuInsightsConsent {
-    param([string]$UnixUser, [switch]$PlanOnly)
+    param([switch]$PlanOnly)
     $state = if ($Script:UbuntuInsightsConsentState -eq "true") { "true" } else { "false" }
-    Invoke-Step "Настроить Ubuntu Insights consent для '$UnixUser' (state=$state)" {
+    Invoke-Step "Настроить Ubuntu Insights consent (state=$state)" {
+        # ubuntu-insights запускается от root — это единственный пользователь WSL
         $cmd = @"
 set -e
 state='$state'
@@ -874,33 +993,53 @@ if command -v ubuntu-insights >/dev/null 2>&1; then
     ubuntu-insights consent linux wsl_setup ubuntu_release_upgrader --state="`$state" >/dev/null 2>&1 || true
 fi
 "@
-        Invoke-WslUser -User $UnixUser -Script $cmd
+        Invoke-WslRoot $cmd
     } -PlanOnly:$PlanOnly
 }
 
 function Ensure-WslInsideConfig {
     param([switch]$PlanOnly)
-    $unixUser = Get-SanitizedWindowsUser
-    Invoke-Step "Настроить /etc/wsl.conf для systemd, interop, автомонтирования /mnt и default user '$unixUser'" {
-        $cmd = @"
-set -e
-cat > /etc/wsl.conf <<'WSLCONF'
+    Invoke-Step "Настроить /etc/wsl.conf для systemd, interop, автомонтирования и default user root" {
+        # Используем single-quote here-string ('@'...'@') чтобы $变量 не интерполировались PowerShell.
+        # Обратный апостроф \` внутри single-quote here-string — это literal обратный апостроф,
+        # а не escape-символ для PowerShell (single-quote здесь работает как C-строка с \' ).
+        $wslConf = @'
 [boot]
 systemd=true
 
 [interop]
 enabled=true
-appendWindowsPath=true
+appendWindowsPath=false
 
 [automount]
 enabled=true
 root=/mnt/
 
 [user]
-default=$unixUser
+default=root
+'@
+        Invoke-Step "Записать /etc/wsl.conf" {
+            $cmd = @"
+set -e
+cat > /etc/wsl.conf <<'WSLCONF'
+$wslConf
 WSLCONF
 "@
-        Invoke-WslRoot $cmd
+            Invoke-WslRoot $cmd
+        } -PlanOnly:$PlanOnly
+
+        # Дополнительно: убедиться что root-пользователь имеет sudo без пароля
+        $sudoCmd = @'
+set -e
+if ! grep -q '^root ALL=(ALL) NOPASSWD:ALL' /etc/sudoers.d/90-root-sudo 2>/dev/null; then
+    printf '%s\n' 'root ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/90-root-sudo
+    chmod 440 /etc/sudoers.d/90-root-sudo
+fi
+# Удалить старый файл sudoers для пользователя, если он есть
+rm -f /etc/sudoers.d/90-omo-bootstrap-user 2>/dev/null || true
+'@
+        Invoke-WslRoot $sudoCmd -PlanOnly:$false
+
         wsl.exe --shutdown | Out-Null
     } -PlanOnly:$PlanOnly
 }
@@ -1020,7 +1159,7 @@ PROFILE
 }
 
 function Assert-WslToolCapabilities {
-    param([string]$UnixUser, [switch]$PlanOnly)
+    param([switch]$PlanOnly)
     Invoke-Step "Проверить инструменты WSL для OmO" {
         $cmd = @'
 set -e
@@ -1031,28 +1170,19 @@ test -x /usr/local/bin/opencode
 /usr/local/bin/opencode --version
 '@
         Invoke-WslRoot $cmd
-        if (-not [string]::IsNullOrWhiteSpace($UnixUser)) {
-            Invoke-WslUser -User $UnixUser -Script @'
-set -e
-test -x /usr/local/bin/opencode
-/usr/local/bin/opencode --version
-'@
-        }
     } -PlanOnly:$PlanOnly
 }
 
 function Ensure-WslOpenCodeConfig {
-    param([string]$UnixUser, [switch]$PlanOnly)
-    $effectiveUnixUser = if ($UnixUser) { $UnixUser } else { Get-SanitizedWindowsUser }
-    Invoke-Step "Создать минимальный конфиг OpenCode для '$effectiveUnixUser', если его ещё нет" {
+    param([switch]$PlanOnly)
+    Invoke-Step "Создать минимальный конфиг OpenCode для root, если его ещё нет" {
+        # HOME=root при запуске от root — используем $HOME в bash-скрипте
         $cmd = @'
 set -e
-unix_user='__UNIX_USER__'
-if ! id -u "$unix_user" >/dev/null 2>&1; then
-    echo "ERROR: Unix user '$unix_user' does not exist" >&2
-    exit 34
+user_home="$HOME"
+if [ -z "$user_home" ] || [ "$user_home" = "root" ]; then
+    user_home="/root"
 fi
-user_home="$(getent passwd "$unix_user" | cut -d: -f6)"
 mkdir -p "$user_home/.config/opencode"
 if [ ! -f "$user_home/.config/opencode/opencode.jsonc" ] && [ ! -f "$user_home/.config/opencode/opencode.json" ]; then
     cat > "$user_home/.config/opencode/opencode.jsonc" <<'JSON'
@@ -1063,39 +1193,18 @@ if [ ! -f "$user_home/.config/opencode/opencode.jsonc" ] && [ ! -f "$user_home/.
 }
 JSON
 fi
-chown -R "$unix_user:$unix_user" "$user_home/.config/opencode"
+chown -R root:root "$user_home/.config/opencode"
 '@
-        $cmd = $cmd.Replace("__UNIX_USER__", $effectiveUnixUser)
         Invoke-WslRoot $cmd
     } -PlanOnly:$PlanOnly
 }
 
 function Ensure-OpenCodeSystemdService {
-    param([string]$WslRepoPath, [string]$UnixUser, [switch]$PlanOnly)
+    param([string]$WslRepoPath, [switch]$PlanOnly)
     $safeRepo = $WslRepoPath -replace "'", "'\''"
-    $effectiveUnixUser = if ($UnixUser) { $UnixUser } else { Get-SanitizedWindowsUser }
-    Invoke-Step "Создать и, если systemd активен, запустить opencode-serve.service от '$effectiveUnixUser'" {
-        $cmd = @'
-set -e
-repo_path='__WSL_REPO__'
-opencode_port='__OPENCODE_PORT__'
-unix_user='__UNIX_USER__'
-opencode_bin="$(command -v opencode || true)"
-if [ -z "$opencode_bin" ] && [ -x /usr/local/bin/opencode ]; then
-    opencode_bin=/usr/local/bin/opencode
-fi
-if [ -z "$opencode_bin" ]; then
-    echo "ERROR: opencode is not in PATH for service setup" >&2
-    exit 31
-fi
-if ! id -u "$unix_user" >/dev/null 2>&1; then
-    echo "ERROR: Unix user '$unix_user' does not exist" >&2
-    exit 34
-fi
-user_home="$(getent passwd "$unix_user" | cut -d: -f6)"
-mkdir -p "$user_home/.local/state/omo"
-chown -R "$unix_user:$unix_user" "$user_home/.local"
-cat > /etc/systemd/system/opencode-serve.service <<SVC
+    Invoke-Step "Создать и, если systemd активен, запустить opencode-serve.service от root" {
+        # Используем .Replace() для подстановки переменных PowerShell в here-string
+        $svcContent = @"
 [Unit]
 Description=OpenCode headless server
 After=network-online.target
@@ -1103,17 +1212,24 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$unix_user
-Group=$unix_user
-WorkingDirectory=$repo_path
-Environment=HOME=$user_home
-Environment=XDG_CONFIG_HOME=$user_home/.config
-ExecStart=/usr/local/bin/opencode serve --hostname 0.0.0.0 --port $opencode_port
+User=root
+Group=root
+WorkingDirectory=$safeRepo
+Environment=HOME=/root
+Environment=XDG_CONFIG_HOME=/root/.config
+ExecStart=/usr/local/bin/opencode serve --hostname 0.0.0.0 --port __OPENCODE_PORT__
 Restart=on-failure
 RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
+"@
+        $svcContent = $svcContent.Replace("__OPENCODE_PORT__", [string]$OpenCodePort)
+
+        $cmd = @"
+set -e
+cat > /etc/systemd/system/opencode-serve.service <<SVC
+$svcContent
 SVC
 if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload
@@ -1123,35 +1239,34 @@ if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
 else
     echo "systemd is not active yet; service file was written, one-shot serve will be used now"
 fi
-'@
-        $cmd = $cmd.Replace("__WSL_REPO__", $safeRepo).Replace("__OPENCODE_PORT__", [string]$OpenCodePort).Replace("__UNIX_USER__", $effectiveUnixUser)
+"@
         Invoke-WslRoot $cmd
     } -PlanOnly:$PlanOnly
 }
 
 function Start-OpenCodeServe {
-    param([string]$WslRepoPath, [string]$UnixUser, [switch]$PlanOnly)
+    param([string]$WslRepoPath, [switch]$PlanOnly)
     $safeRepo = $WslRepoPath -replace "'", "'\''"
-    $effectiveUnixUser = if ($UnixUser) { $UnixUser } else { Get-SanitizedWindowsUser }
-    Invoke-Step "Запустить разовый OpenCode web server в WSL для проекта $WslRepoPath от '$effectiveUnixUser'" {
+    Invoke-Step "Запустить разовый OpenCode web server в WSL для проекта $WslRepoPath от root" {
+        # Очищаем старые процессы на порту (от любого пользователя)
         $cleanupCmd = @'
 set -e
 opencode_port='__OPENCODE_PORT__'
-unix_user='__UNIX_USER__'
 if command -v ss >/dev/null 2>&1; then
     pids="$(ss -H -tlnp "sport = :$opencode_port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u || true)"
     for pid in $pids; do
         owner="$(ps -o user= -p "$pid" 2>/dev/null | awk '{print $1}' || true)"
         args="$(ps -o args= -p "$pid" 2>/dev/null || true)"
-        if [ "$owner" != "$unix_user" ] && printf '%s\n' "$args" | grep -qi opencode; then
+        if printf '%s\n' "$args" | grep -qi opencode; then
             kill "$pid" 2>/dev/null || true
         fi
     done
 fi
 '@
-        $cleanupCmd = $cleanupCmd.Replace("__OPENCODE_PORT__", [string]$OpenCodePort).Replace("__UNIX_USER__", $effectiveUnixUser)
+        $cleanupCmd = $cleanupCmd.Replace("__OPENCODE_PORT__", [string]$OpenCodePort)
         Invoke-WslRoot $cleanupCmd
 
+        # Запускаем serve от root (HOME=/root по умолчанию при -u root)
         $cmd = @'
 set -e
 repo_path='__WSL_REPO__'
@@ -1180,7 +1295,9 @@ fi
 curl -fsS --max-time 5 "http://127.0.0.1:$opencode_port/" >/dev/null
 '@
         $cmd = $cmd.Replace("__WSL_REPO__", $safeRepo).Replace("__OPENCODE_PORT__", [string]$OpenCodePort)
-        Invoke-WslUser -User $effectiveUnixUser -Script $cmd
+
+        # Запускаем от root — это единственный пользователь WSL
+        Invoke-WslRoot $cmd
     } -PlanOnly:$PlanOnly
 }
 
@@ -1240,10 +1357,11 @@ function Run-Install {
         Ensure-WSLBase -PlanOnly:$PlanOnly
         Ensure-UbuntuInsightsWindowsDefault -PlanOnly:$PlanOnly
         Ensure-Ubuntu -PlanOnly:$PlanOnly
-        $unixUser = Ensure-WslDefaultUser -PlanOnly:$PlanOnly
-        Ensure-UbuntuInsightsConsent -UnixUser $unixUser -PlanOnly:$PlanOnly
+        # WSL по умолчанию работает от root — пользователь root существует в любом Ubuntu-дистрибуте
+        Ensure-UbuntuInsightsConsent -PlanOnly:$PlanOnly
         Ensure-WslConfig -PlanOnly:$PlanOnly
         Ensure-WslInsideConfig -PlanOnly:$PlanOnly
+
         Assert-WslBaseCapabilities -PlanOnly:$PlanOnly
         $actualDistro = if ($PlanOnly) { $DistroName } else { Resolve-WslDistroName }
         $state["distro"] = $actualDistro
@@ -1253,10 +1371,10 @@ function Run-Install {
         }
 
         Ensure-WslPackagesAndOpenCode -PlanOnly:$PlanOnly
-        Assert-WslToolCapabilities -UnixUser $unixUser -PlanOnly:$PlanOnly
-        Ensure-WslOpenCodeConfig -UnixUser $unixUser -PlanOnly:$PlanOnly
-        Ensure-OpenCodeSystemdService -WslRepoPath $wslRepo -UnixUser $unixUser -PlanOnly:$PlanOnly
-        Start-OpenCodeServe -WslRepoPath $wslRepo -UnixUser $unixUser -PlanOnly:$PlanOnly
+        Assert-WslToolCapabilities -PlanOnly:$PlanOnly
+        Ensure-WslOpenCodeConfig -PlanOnly:$PlanOnly
+        Ensure-OpenCodeSystemdService -WslRepoPath $wslRepo -PlanOnly:$PlanOnly
+        Start-OpenCodeServe -WslRepoPath $wslRepo -PlanOnly:$PlanOnly
         Ensure-PortProxy -PlanOnly:$PlanOnly
         if (-not $PlanOnly) { Mark-Checkpoint $state "opencode_web" "present" "http://127.0.0.1:$OpenCodePort/" }
 
@@ -1264,6 +1382,7 @@ function Run-Install {
         Write-Host "Бутстрап OmO завершён."
         Write-Host "Репозиторий: $target"
         Write-Host "Путь в WSL:  $wslRepo"
+        Write-Host "WSL user:     root (по умолчанию)"
         Write-Host "OpenCode:    http://127.0.0.1:$OpenCodePort/"
     } finally {
         $Script:PlanOnlyMode = $previousPlanMode
@@ -1306,18 +1425,18 @@ function Repair-Bootstrap {
     Write-Log "Ремонт использует целевую папку: $target"
     Ensure-UbuntuInsightsWindowsDefault
     Ensure-Ubuntu
-    $unixUser = Ensure-WslDefaultUser
-    Ensure-UbuntuInsightsConsent -UnixUser $unixUser
+    # root по умолчанию — нет нужды создавать пользователя
+    Ensure-UbuntuInsightsConsent
     Ensure-WslConfig
     Ensure-WslInsideConfig
     Assert-WslBaseCapabilities
     if (Test-Path $target) {
         $wslRepo = Convert-ToWslPath $target
         Ensure-WslPackagesAndOpenCode
-        Assert-WslToolCapabilities -UnixUser $unixUser
-        Ensure-WslOpenCodeConfig -UnixUser $unixUser
-        Ensure-OpenCodeSystemdService -WslRepoPath $wslRepo -UnixUser $unixUser
-        Start-OpenCodeServe -WslRepoPath $wslRepo -UnixUser $unixUser
+        Assert-WslToolCapabilities
+        Ensure-WslOpenCodeConfig
+        Ensure-OpenCodeSystemdService -WslRepoPath $wslRepo
+        Start-OpenCodeServe -WslRepoPath $wslRepo
         Ensure-PortProxy
     }
 }
