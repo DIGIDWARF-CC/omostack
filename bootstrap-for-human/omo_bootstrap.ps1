@@ -18,7 +18,7 @@ try {
 } catch {}
 
 $RepoUrl = "https://github.com/DIGIDWARF-CC/omostack.git"
-$DistroName = "Ubuntu-24.04"
+$DistroName = "Ubuntu"
 $OpenCodePort = 4096
 $BootstrapRoot = Join-Path $env:LOCALAPPDATA "OmOBootstrap"
 $StatePath = Join-Path $BootstrapRoot "state.json"
@@ -326,6 +326,36 @@ function Get-WslStatus {
     return $result
 }
 
+function Test-RebootPending {
+    # Проверяем CBS registry key — стандартный способ детекта pending reboot от Windows Installer и DISM
+    if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') {
+        return $true
+    }
+    # Secondary check: PendingFileRenameOperations (MSI/Setup)
+    try {
+        $sm = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue
+        if ($null -ne $sm.PendingFileRenameOperations) { return $true }
+    } catch {}
+    return $false
+}
+
+function Test-FeatureEnabled {
+    param([string]$FeatureName, [switch]$PlanOnly)
+    try {
+        # Пробуем Get-WindowsOptionalFeature (PS5.1 DISM module)
+        if (-not $PlanOnly) { Require-Elevation "Для проверки WSL features" "Install" (Get-DefaultTargetPath) }
+        $feat = Get-WindowsOptionalFeature -Online -FeatureName $FeatureName -ErrorAction SilentlyContinue
+        return ($null -ne $feat -and $feat.State -eq 'Enabled')
+    } catch {
+        # Fallback: DISM CLI
+        try {
+            if (-not $PlanOnly) { Require-Elevation "Для проверки WSL features" "Install" (Get-DefaultTargetPath) }
+            $dismOut = dism.exe /online /get-feature /featurename:$FeatureName 2>&1 | Out-String
+            return ($dismOut -match "State\s+:\s+Enabled")
+        } catch { return $false }
+    }
+}
+
 function Ensure-Git {
     param([switch]$PlanOnly)
     if (Get-Command git.exe -ErrorAction SilentlyContinue) {
@@ -355,17 +385,145 @@ function Ensure-Repo {
     } -PlanOnly:$PlanOnly
 }
 
-function Ensure-WslFeature {
+function Ensure-WSLBase {
+    # Основная стратегия: wsl --install включает ВСЕ нужные фичи и ставит Ubuntu.
+    # Fallback (Windows 10 без встроенного wsl --install): ручное включение feature'ов + ребут.
     param([switch]$PlanOnly)
+
     if (-not $PlanOnly) {
-        Require-Elevation "Для включения компонентов WSL могут понадобиться права администратора." "Install" (Get-DefaultTargetPath)
+        Require-Elevation "Для установки WSL могут понадобиться права администратора." "Install" (Get-DefaultTargetPath)
     }
-    Invoke-Step "Включить компонент Windows Subsystem for Linux" {
-        Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart | Out-Null
-    } -PlanOnly:$PlanOnly
-    Invoke-Step "Включить компонент Virtual Machine Platform" {
-        Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart | Out-Null
-    } -PlanOnly:$PlanOnly
+
+    # Проверяем, работает ли wsl уже
+    $wslOk = $false
+    try {
+        & wsl.exe --version *> $null 2>&1
+        if ($LASTEXITCODE -eq 0) { $wslOk = $true }
+    } catch {}
+
+    if ($wslOk) {
+        Write-Log "WSL уже установлен и работает."
+        return
+    }
+
+    # Проверяем, есть ли wsl.exe в PATH (может быть установлен но не активирован)
+    $hasWslExe = Get-Command wsl.exe -ErrorAction SilentlyContinue
+    if (-not $hasWslExe) {
+        Write-Log "wsl.exe не найден. Включаем компоненты WSL вручную..."
+
+        # Проверяем текущее состояние фичей ДО включения
+        $wslState = 'Disabled'
+        $vmState = 'Disabled'
+        try {
+            $wslFeat = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
+            if ($null -ne $wslFeat) { $wslState = $wslFeat.State }
+        } catch {}
+        try {
+            $vmFeat = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
+            if ($null -ne $vmFeat) { $vmState = $vmFeat.State }
+        } catch {}
+
+        Write-Log "Текущее состояние: WSL=$wslState, VMP=$vmState"
+
+        # Включаем только если не Enabled
+        if ($wslState -ne 'Enabled') {
+            Invoke-Step "Включить компонент Windows Subsystem for Linux" {
+                Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart | Out-Null
+            } -PlanOnly:$PlanOnly
+        } else {
+            Write-Log "WSL feature уже Enabled, пропускаем."
+        }
+
+        if ($vmState -ne 'Enabled') {
+            Invoke-Step "Включить компонент Virtual Machine Platform" {
+                Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart | Out-Null
+            } -PlanOnly:$PlanOnly
+        } else {
+            Write-Log "VMP feature уже Enabled, пропускаем."
+        }
+
+        # Re-query state после включения (DISM не сбрасывает State до ребута)
+        $wslStateAfter = 'Unknown'
+        $vmStateAfter = 'Unknown'
+        try {
+            $wslFeat2 = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
+            if ($null -ne $wslFeat2) { $wslStateAfter = $wslFeat2.State }
+        } catch {}
+        try {
+            $vmFeat2 = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
+            if ($null -ne $vmFeat2) { $vmStateAfter = $vmFeat2.State }
+        } catch {}
+
+        Write-Log "После включения: WSL=$wslStateAfter, VMP=$vmStateAfter"
+
+        # Если хоть одна фича не Enabled — нужен ребут
+        if ($wslStateAfter -ne 'Enabled' -or $vmStateAfter -ne 'Enabled') {
+            Write-Log "WSL компоненты включены, но требуют перезагрузку (CBS defer)."
+            if (-not $PlanOnly) {
+                # Запускаем wsl --install — он сам доделает оставшиеся фичи после ребута
+                Write-Log "Запуск wsl --install для завершения активации..."
+                Invoke-Native "wsl.exe" @("--install")
+            } else {
+                Write-Host "[план] wsl --install (завершит активацию фич после ребута)"
+            }
+        } else {
+            # Обе фичи Enabled — пробуем wsl сразу
+            Start-Sleep -Seconds 3
+            try {
+                & wsl.exe --version *> $null 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Log "WSL компоненты активированы без перезагрузки."
+                    return
+                }
+            } catch {}
+        }
+    } else {
+        # wsl.exe есть, но не работает (exit code != 0 — вероятно WSL_E_WSL_OPTIONAL_COMPONENT_REQUIRED)
+        # Это значит фичи включены но не активированы до ребута
+        Write-Log "wsl.exe найден но не работает. Активируем компоненты..."
+
+        # Включаем обе фичи на всякий случай (не повредит если уже Enabled)
+        Invoke-Step "Включить компонент Windows Subsystem for Linux" {
+            Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart | Out-Null
+        } -PlanOnly:$PlanOnly
+        Invoke-Step "Включить компонент Virtual Machine Platform" {
+            Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart | Out-Null
+        } -PlanOnly:$PlanOnly
+
+        Start-Sleep -Seconds 3
+        try {
+            & wsl.exe --version *> $null 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Log "WSL компоненты активированы без перезагрузки."
+                return
+            }
+        } catch {}
+
+        # Fallback: wsl --install доделает остальное
+        if (-not $PlanOnly) {
+            Invoke-Native "wsl.exe" @("--install")
+        } else {
+            Write-Host "[план] wsl --install (завершит активацию фич после ребута)"
+        }
+    }
+
+    # Если PlanOnly — на этом хватит, дальше пойдёт Ensure-Ubuntu
+}
+
+function Test-WSLReady {
+    # Использует ProcessStartInfo для надёжного exit code capture в PS5.1 (wsl --status exit 0 = ready)
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "wsl.exe"
+        $psi.Arguments = "--status"
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $p = [System.Diagnostics.Process]::Start($psi)
+        $finished = $p.WaitForExit(5000)
+        if ($finished -and $p.ExitCode -eq 0) { return $true }
+    } catch {}
+    return $false
 }
 
 function Ensure-Ubuntu {
@@ -392,12 +550,70 @@ function Ensure-Ubuntu {
                     Write-Log "Fallback WSL install тоже вернул ошибку: $installError"
                 }
             }
-            Start-Sleep -Seconds 2
+
+            # wsl --install может вернуть success но фичи ещё не активированы (нужен ребут)
+            # Ждём и проверяем несколько раз — используем Test-WSLReady для надёжного exit code capture
+            $retries = 8
+            for ($i = 0; $i -lt $retries; $i++) {
+                Start-Sleep -Seconds 5
+                if (Test-WSLReady) {
+                    Write-Log "WSL стал активен после $($i * 5 + 5) сек ожидания."
+                    break
+                }
+
+                # Если wsl --install уже запустился, ждём дальше — он сам активирует фичи
+                $hasWsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+                if ($hasWsl) {
+                    try {
+                        $psi2 = New-Object System.Diagnostics.ProcessStartInfo
+                        $psi2.FileName = "wsl.exe"
+                        $psi2.Arguments = "--list --quiet 2>$null"
+                        $psi2.RedirectStandardError = $true
+                        $psi2.UseShellExecute = $false
+                        $p2 = [System.Diagnostics.Process]::Start($psi2)
+                        $done = $p2.WaitForExit(3000)
+                        if ($done -and $p2.ExitCode -eq 0) {
+                            Write-Log "Ubuntu найден после $($i * 5 + 5) сек ожидания."
+                            break
+                        }
+                    } catch {}
+                }
+
+                Write-Log "Ожидание WSL активности... попытка $((($i)+1))/$retries"
+            }
+
+            # Финальная проверка
             $afterInstall = Get-WslStatus
             $resolved = Resolve-WslDistroName
             if ($afterInstall.distro -or (Test-WslDistroRunnable $resolved)) {
                 Write-Log "Ubuntu-дистрибутив найден после установки как '$resolved'. Продолжаю бутстрап."
             } else {
+                # Проверяем, есть ли wsl.exe — если да, но не работает, нужен ребут
+                $hasWsl = Get-Command wsl.exe -ErrorAction SilentlyContinue
+                if ($hasWsl) {
+                    Write-Host ""
+                    Write-Host "WSL компоненты включены, но требуют перезагрузку." -ForegroundColor Yellow
+                    Write-Host ""
+                    Write-Host "Что делать:"
+                    Write-Host "  1. Перезагрузи компьютер (обязательно!)"
+                    if (-not $PlanOnly) {
+                        Write-Host "    (нажми Y для перезагрузки сейчас, или любую другую клавишу для выхода)" -ForegroundColor Yellow
+                        $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+                        if ($key.Character -eq 'y' -or $key.Character -eq 'Y') {
+                            Write-Log "Перезагрузка компьютера..."
+                            Restart-Computer -Force
+                            exit 0
+                        }
+                    } else {
+                        Write-Host "    (в режиме плана — перезагрузи вручную)" -ForegroundColor Yellow
+                    }
+                    Write-Host "  2. После перезагрузки запусти этот же omo_bootstrap.ps1 ещё раз,"
+                    Write-Host "     пункт 1 'Установить / продолжить'."
+                    Write-Host ""
+                    Write-Host "Скрипт продолжит установку Ubuntu после ребута." -ForegroundColor Yellow
+                    throw "WSL требует перезагрузку. Перезагрузи и запусти скрипт повторно."
+                }
+
                 Write-Host ""
                 Write-Host "WSL/Ubuntu ещё не готовы для продолжения."
                 Write-Host "Что делать:"
@@ -687,44 +903,52 @@ function Run-Install {
     $previousPlanMode = $Script:PlanOnlyMode
     $Script:PlanOnlyMode = [bool]$PlanOnly
     try {
-    $target = Get-DefaultTargetPath
-    if (-not $TargetPath -and -not $PlanOnly) { $target = Read-TargetPath }
-    $state = Load-State
-    $state["target_path"] = $target
-    $state["repo_url"] = $RepoUrl
-    $state["distro"] = $DistroName
-    if (-not $PlanOnly) { Save-State $state }
+        $target = Get-DefaultTargetPath
+        if (-not $TargetPath -and -not $PlanOnly) { $target = Read-TargetPath }
+        $state = Load-State
+        $state["target_path"] = $target
+        $state["repo_url"] = $RepoUrl
+        $state["distro"] = $DistroName
+        if (-not $PlanOnly) { Save-State $state }
 
-    Write-Log "Целевая папка: $target"
-    $wslRepo = Convert-ToWslPath $target
-    Write-Log "Путь проекта в WSL: $wslRepo"
+        Write-Log "Целевая папка: $target"
+        $wslRepo = Convert-ToWslPath $target
+        Write-Log "Путь проекта в WSL: $wslRepo"
 
-    Ensure-Git -PlanOnly:$PlanOnly
-    Ensure-Repo -PathToUse $target -PlanOnly:$PlanOnly
-    if (-not $PlanOnly) { Mark-Checkpoint $state "repo" "present" $target }
+        Ensure-Git -PlanOnly:$PlanOnly
+        Ensure-Repo -PathToUse $target -PlanOnly:$PlanOnly
+        if (-not $PlanOnly) { Mark-Checkpoint $state "repo" "present" $target }
 
-    Ensure-WslFeature -PlanOnly:$PlanOnly
-    Ensure-Ubuntu -PlanOnly:$PlanOnly
-    Ensure-WslDefaultUser -PlanOnly:$PlanOnly | Out-Null
-    Ensure-WslConfig -PlanOnly:$PlanOnly
-    Ensure-WslInsideConfig -PlanOnly:$PlanOnly
-    if (-not $PlanOnly) { Mark-Checkpoint $state "wsl" "present" $DistroName }
+        Ensure-WSLBase -PlanOnly:$PlanOnly
+        Ensure-Ubuntu -PlanOnly:$PlanOnly
+        Ensure-WslDefaultUser -PlanOnly:$PlanOnly | Out-Null
+        Ensure-WslConfig -PlanOnly:$PlanOnly
+        Ensure-WslInsideConfig -PlanOnly:$PlanOnly
+        if (-not $PlanOnly) { Mark-Checkpoint $state "wsl" "present" $DistroName }
 
-    Ensure-WslPackagesAndOpenCode -PlanOnly:$PlanOnly
-    Ensure-WslOpenCodeConfig -PlanOnly:$PlanOnly
-    Ensure-OpenCodeSystemdService -WslRepoPath $wslRepo -PlanOnly:$PlanOnly
-    Start-OpenCodeServe -WslRepoPath $wslRepo -PlanOnly:$PlanOnly
-    Ensure-PortProxy -PlanOnly:$PlanOnly
-    if (-not $PlanOnly) { Mark-Checkpoint $state "opencode_web" "present" "http://127.0.0.1:$OpenCodePort/" }
+        Ensure-WslPackagesAndOpenCode -PlanOnly:$PlanOnly
+        Ensure-WslOpenCodeConfig -PlanOnly:$PlanOnly
+        Ensure-OpenCodeSystemdService -WslRepoPath $wslRepo -PlanOnly:$PlanOnly
+        Start-OpenCodeServe -WslRepoPath $wslRepo -PlanOnly:$PlanOnly
+        Ensure-PortProxy -PlanOnly:$PlanOnly
+        if (-not $PlanOnly) { Mark-Checkpoint $state "opencode_web" "present" "http://127.0.0.1:$OpenCodePort/" }
 
-    Write-Host ""
-    Write-Host "Бутстрап OmO завершён."
-    Write-Host "Репозиторий: $target"
-    Write-Host "Путь в WSL:  $wslRepo"
-    Write-Host "OpenCode:    http://127.0.0.1:$OpenCodePort/"
+        Write-Host ""
+        Write-Host "Бутстрап OmO завершён."
+        Write-Host "Репозиторий: $target"
+        Write-Host "Путь в WSL:  $wslRepo"
+        Write-Host "OpenCode:    http://127.0.0.1:$OpenCodePort/"
     } finally {
         $Script:PlanOnlyMode = $previousPlanMode
     }
+}
+
+function Show-Pause {
+    param([switch]$IsError)
+    if ($Mode -eq "Menu") { return }
+    Write-Host ""
+    if ($IsError) { Write-Host "Нажмите любую клавишу для выхода..." }
+    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
 }
 
 function Show-Status {
@@ -795,16 +1019,19 @@ function Show-Menu {
     }
 }
 
-if ($Help) {
-    Show-Help
-    exit 0
-}
-
-switch ($Mode) {
-    "Menu" { Show-Menu }
-    "Install" { Run-Install }
-    "Plan" { Run-Install -PlanOnly }
-    "Status" { Show-Status }
-    "Repair" { Repair-Bootstrap }
-    "UninstallBootstrapArtifacts" { Remove-BootstrapArtifacts }
+try {
+    switch ($Mode) {
+        "Menu" { Show-Menu; return }
+        "Install" { Run-Install; Show-Pause; return }
+        "Plan" { Run-Install -PlanOnly; Show-Pause; return }
+        "Status" { Show-Status; Show-Pause; return }
+        "Repair" { Repair-Bootstrap; Show-Pause; return }
+        "UninstallBootstrapArtifacts" { Remove-BootstrapArtifacts; Show-Pause; return }
+    }
+} catch [System.Exception] {
+    Write-Host ""
+    Write-Host "=== ОШИБКА ===" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    if ($_.ScriptStackTrace) { Write-Host ""; Write-Host $_.ScriptStackTrace }
+    Show-Pause -IsError
 }
