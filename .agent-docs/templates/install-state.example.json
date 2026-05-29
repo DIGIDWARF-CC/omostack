@@ -3,7 +3,7 @@
   "installed_at": "2026-01-01T00:00:00+03:00",
   "os": {
     "type": "wsl-linux",
-    "distro": "Ubuntu-24.04",
+    "distro": "Ubuntu",
     "kernel": "5.15.0-wsl"
   },
   "machine": "example-machine",

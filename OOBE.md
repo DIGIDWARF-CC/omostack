@@ -21,16 +21,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-for-human\om
 
 ## What The Bootstrapper Does
 
-1. Asks where to install OmO and clones `https://gitlab.kokoc.com/kg/crmbitrix-bitrix-crm/omo.git`.
-2. Checks Windows PowerShell, Windows build, Git, WSL availability, and Ubuntu 24.04.
-3. Enables WSL features and installs `Ubuntu-24.04` when needed.
-4. Makes `Ubuntu-24.04` the default WSL distro.
-5. Writes Windows `.wslconfig` and WSL `/etc/wsl.conf` for systemd, interop, `/mnt` automount, and best available VPN-aware networking.
+1. Asks where to install OmO and clones `https://github.com/DIGIDWARF-CC/omostack.git`.
+2. Checks Windows PowerShell, Windows build, Git, WSL availability, and Ubuntu capabilities.
+3. Enables WSL features and installs generic `Ubuntu` when needed.
+4. Makes the resolved Ubuntu distro the default WSL distro.
+5. Updates Windows `.wslconfig` and WSL `/etc/wsl.conf` for systemd, interop, `/mnt` automount, and best available VPN-aware networking.
 6. Installs WSL base packages and OpenCode silently.
-7. Starts `opencode serve` in WSL with the OmO repository as the working project.
-8. Exposes the web UI to Windows at `http://127.0.0.1:4096/` through local portproxy/firewall rules.
+7. Starts `opencode serve` in WSL as the created Unix user with the OmO repository as the working project.
+8. Exposes the web UI to Windows at `http://127.0.0.1:4096/` through local loopback portproxy.
 
-Windows 11 22H2+ can use WSL mirrored networking, DNS tunneling, and auto proxy. Windows 10 is treated as best-effort: the bootstrapper keeps localhost forwarding and uses portproxy for Windows access to the WSL OpenCode web UI.
+Windows 11 22H2+ can use WSL mirrored networking, DNS tunneling, and auto proxy. Windows 10 is treated as best-effort: the bootstrapper keeps localhost forwarding only and uses portproxy for Windows access to the WSL OpenCode web UI.
 
 ## Agent Stage-2
 

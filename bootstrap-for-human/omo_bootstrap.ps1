@@ -25,6 +25,7 @@ $StatePath = Join-Path $BootstrapRoot "state.json"
 $LogPath = Join-Path $BootstrapRoot "bootstrap.log"
 $Script:PlanOnlyMode = $false
 $Script:ActiveDistroName = $null
+$Script:UbuntuInsightsConsentState = $null
 
 function Write-Log {
     param([string]$Message)
@@ -183,6 +184,58 @@ function Invoke-Native {
     return ""
 }
 
+function Invoke-NativeWithInput {
+    param([string]$FilePath, [string[]]$Arguments, [string]$StandardInputText)
+    function Quote-NativeArg {
+        param([string]$Arg)
+        if ($Arg -match '[\s"]') {
+            return '"' + ($Arg -replace '"', '\"') + '"'
+        }
+        return $Arg
+    }
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $FilePath
+    $psi.Arguments = (($Arguments | ForEach-Object { Quote-NativeArg $_ }) -join " ")
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $false
+    $psi.RedirectStandardError = $false
+    Write-Log ("Команда: {0} {1} <stdin>" -f $FilePath, $psi.Arguments)
+    $p = [System.Diagnostics.Process]::Start($psi)
+    try {
+        if ($null -ne $StandardInputText) {
+            $p.StandardInput.Write(($StandardInputText -replace "`r", ""))
+        }
+    } catch {
+        Write-Log "Не удалось полностью передать stdin в ${FilePath}: $($_.Exception.Message)"
+    } finally {
+        try { $p.StandardInput.Close() } catch {}
+    }
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while (-not $p.HasExited) {
+        $elapsed = $sw.Elapsed.ToString("hh\:mm\:ss")
+        Write-Progress -Activity "OmO Bootstrap" -Status "Выполняется: $FilePath $($psi.Arguments) | прошло $elapsed" -PercentComplete -1
+        Start-Sleep -Seconds 1
+    }
+    $sw.Stop()
+    Write-Progress -Activity "OmO Bootstrap" -Completed
+    Write-Log ("Команда завершена за {0}" -f $sw.Elapsed.ToString("hh\:mm\:ss"))
+    if ($p.ExitCode -ne 0) {
+        throw "$FilePath завершился с кодом $($p.ExitCode)"
+    }
+    return ""
+}
+
+function Invoke-WslScript {
+    param([string]$User, [string]$Script)
+    $args = @("-d", (Resolve-WslDistroName))
+    if (-not [string]::IsNullOrWhiteSpace($User)) {
+        $args += @("-u", $User)
+    }
+    $args += @("--", "bash", "-se")
+    Invoke-NativeWithInput "wsl.exe" $args $Script
+}
+
 function Convert-ToWslPath {
     param([string]$WindowsPath)
     $full = [System.IO.Path]::GetFullPath($WindowsPath)
@@ -234,10 +287,82 @@ function Test-Windows11_22H2OrNewer {
     return ($build -ge 22621)
 }
 
+function Get-BackupDirectory {
+    param([string]$Name)
+    $stamp = Get-Date -Format "yyyyMMddTHHmmss"
+    $backupDir = Join-Path $BootstrapRoot ("backups\{0}-{1}" -f $stamp, $Name)
+    New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+    return $backupDir
+}
+
+function Update-WslConfigContent {
+    param([string[]]$Lines, [hashtable]$Desired, [string[]]$DesiredOrder, [string[]]$RemoveKeys)
+    $output = New-Object System.Collections.Generic.List[string]
+    $seen = @{}
+    $inWsl2 = $false
+    $foundWsl2 = $false
+
+    function Add-MissingDesiredWsl2Keys {
+        foreach ($key in $DesiredOrder) {
+            if (-not $seen.ContainsKey($key)) {
+                $output.Add(("{0}={1}" -f $key, $Desired[$key]))
+                $seen[$key] = $true
+            }
+        }
+    }
+
+    foreach ($line in @($Lines)) {
+        if ($line -match '^\s*\[([^\]]+)\]\s*$') {
+            if ($inWsl2) { Add-MissingDesiredWsl2Keys }
+            $section = $matches[1].Trim()
+            $inWsl2 = ($section -ieq "wsl2")
+            if ($inWsl2) { $foundWsl2 = $true }
+            $output.Add($line)
+            continue
+        }
+
+        if ($inWsl2 -and $line -match '^\s*([^#;][^=]*)\s*=') {
+            $key = $matches[1].Trim()
+            $desiredKey = $DesiredOrder | Where-Object { $_ -ieq $key } | Select-Object -First 1
+            $removeKey = $RemoveKeys | Where-Object { $_ -ieq $key } | Select-Object -First 1
+            if ($desiredKey) {
+                if (-not $seen.ContainsKey($desiredKey)) {
+                    $output.Add(("{0}={1}" -f $desiredKey, $Desired[$desiredKey]))
+                    $seen[$desiredKey] = $true
+                }
+                continue
+            }
+            if ($removeKey) { continue }
+        }
+
+        $output.Add($line)
+    }
+
+    if ($inWsl2) { Add-MissingDesiredWsl2Keys }
+    if (-not $foundWsl2) {
+        if ($output.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($output[$output.Count - 1])) {
+            $output.Add("")
+        }
+        $output.Add("[wsl2]")
+        Add-MissingDesiredWsl2Keys
+    }
+    return @($output)
+}
+
 function Normalize-WslOutput {
     param([string]$Text)
     if ($null -eq $Text) { return "" }
     return ($Text -replace "`0", "" -replace "`r", "")
+}
+
+function Get-WslOsRelease {
+    param([string]$Name)
+    if (-not (Test-WslDistroRunnable $Name)) { return "" }
+    try {
+        return Normalize-WslOutput ((& wsl.exe -d $Name -u root -- cat /etc/os-release 2>$null) -join "`n")
+    } catch {
+        return ""
+    }
 }
 
 function Get-WslDistroNames {
@@ -269,12 +394,9 @@ function Test-WslDistroRunnable {
 
 function Get-WslDistroVersion {
     param([string]$Name)
-    if (-not (Test-WslDistroRunnable $Name)) { return "" }
-    try {
-        return (Normalize-WslOutput ((& wsl.exe -d $Name -u root -- bash -lc '. /etc/os-release 2>/dev/null; printf "%s" "${VERSION_ID:-unknown}"' 2>$null) -join "`n")).Trim()
-    } catch {
-        return ""
-    }
+    $raw = Get-WslOsRelease $Name
+    if ($raw -match '(?m)^VERSION_ID="?([^"\n]+)"?') { return $matches[1].Trim() }
+    return ""
 }
 
 function Resolve-WslDistroName {
@@ -284,7 +406,7 @@ function Resolve-WslDistroName {
     foreach ($name in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
         if (Test-WslDistroRunnable $name) {
             $version = Get-WslDistroVersion $name
-            if ($name -eq $DistroName -or $version -eq "24.04" -or ($name -eq "Ubuntu" -and -not $Script:ActiveDistroName)) {
+            if ($name -eq $DistroName -or $name -like "Ubuntu*") {
                 $Script:ActiveDistroName = $name
                 if ($name -ne $DistroName) {
                     Write-Log "WSL distro '$DistroName' не найден как имя, использую фактический distro '$name' (Ubuntu $version)."
@@ -320,10 +442,24 @@ function Get-WslStatus {
         $result.list_output = $list
         $combined = Normalize-WslOutput ($quiet + "`n" + $list)
         $result.distro = ($combined -match "(?m)^\s*\*?\s*$([regex]::Escape($DistroName))(\s|$)") -or `
-            ($names -contains "Ubuntu" -and (Get-WslDistroVersion "Ubuntu") -eq "24.04")
+            (@($names | Where-Object { $_ -like "Ubuntu*" }).Count -gt 0)
         if ($list -match "\*\s+([^\s]+)") { $result.default_distro = $matches[1] }
     }
     return $result
+}
+
+function Get-WslDistroWslVersion {
+    param([string]$Name)
+    try {
+        $list = Normalize-WslOutput ((& wsl.exe -l -v 2>&1) -join "`n")
+        foreach ($line in ($list -split "`n")) {
+            $clean = ($line -replace "^\s*\*", "").Trim()
+            if ($clean -match "^$([regex]::Escape($Name))\s+\S+\s+([12])\s*$") {
+                return $matches[1]
+            }
+        }
+    } catch {}
+    return ""
 }
 
 function Test-RebootPending {
@@ -354,6 +490,30 @@ function Test-FeatureEnabled {
             return ($dismOut -match "State\s+:\s+Enabled")
         } catch { return $false }
     }
+}
+
+function Ensure-UbuntuInsightsWindowsDefault {
+    param([switch]$PlanOnly)
+    $Script:UbuntuInsightsConsentState = "false"
+    $regPath = "HKCU:\Software\Canonical\Ubuntu"
+    try {
+        $existing = $null
+        if (Test-Path $regPath) {
+            $props = Get-ItemProperty -Path $regPath -Name UbuntuInsightsConsent -ErrorAction SilentlyContinue
+            if ($null -ne $props) { $existing = $props.UbuntuInsightsConsent }
+        }
+        if ($null -ne $existing) {
+            $Script:UbuntuInsightsConsentState = if ([int]$existing -ne 0) { "true" } else { "false" }
+            Write-Log "Ubuntu Insights consent уже задан в Windows registry: $existing"
+            return
+        }
+    } catch {}
+
+    Invoke-Step "Задать Windows default для Ubuntu Insights consent: opt-out" {
+        New-Item -Path $regPath -Force | Out-Null
+        New-ItemProperty -Path $regPath -Name UbuntuInsightsConsent -PropertyType DWord -Value 0 -Force | Out-Null
+        $Script:UbuntuInsightsConsentState = "false"
+    } -PlanOnly:$PlanOnly
 }
 
 function Ensure-Git {
@@ -567,7 +727,7 @@ function Ensure-Ubuntu {
                     try {
                         $psi2 = New-Object System.Diagnostics.ProcessStartInfo
                         $psi2.FileName = "wsl.exe"
-                        $psi2.Arguments = "--list --quiet 2>$null"
+                        $psi2.Arguments = "--list --quiet"
                         $psi2.RedirectStandardError = $true
                         $psi2.UseShellExecute = $false
                         $p2 = [System.Diagnostics.Process]::Start($psi2)
@@ -639,44 +799,92 @@ function Ensure-WslConfig {
     $wslConfigPath = Join-Path $env:USERPROFILE ".wslconfig"
     $networkMode = "best-effort"
     if (Test-Windows11_22H2OrNewer) { $networkMode = "mirrored" }
-    $content = @"
-[wsl2]
-localhostForwarding=true
-dnsTunneling=true
-autoProxy=true
-"@
-    if ($networkMode -eq "mirrored") {
-        $content += "`nnetworkingMode=mirrored`nfirewall=true`n"
+    $desired = @{
+        localhostForwarding = "true"
     }
-    Invoke-Step "Записать Windows-конфиг WSL в $wslConfigPath (VPN-режим: $networkMode)" {
-        Set-Content -Path $wslConfigPath -Value $content -Encoding ASCII
-        wsl.exe --shutdown | Out-Null
+    $desiredOrder = @("localhostForwarding")
+    $removeKeys = @("dnsTunneling", "autoProxy", "networkingMode", "firewall")
+    if ($networkMode -eq "mirrored") {
+        $desired["dnsTunneling"] = "true"
+        $desired["autoProxy"] = "true"
+        $desired["networkingMode"] = "mirrored"
+        $desired["firewall"] = "true"
+        $desiredOrder = @("localhostForwarding", "dnsTunneling", "autoProxy", "networkingMode", "firewall")
+        $removeKeys = @()
+    }
+    Invoke-Step "Обновить Windows-конфиг WSL в $wslConfigPath (VPN-режим: $networkMode)" {
+        $oldLines = @()
+        if (Test-Path $wslConfigPath) {
+            $oldLines = @(Get-Content -Path $wslConfigPath -ErrorAction SilentlyContinue)
+        }
+        $newLines = @(Update-WslConfigContent -Lines $oldLines -Desired $desired -DesiredOrder $desiredOrder -RemoveKeys $removeKeys)
+        $oldText = ($oldLines -join "`n").TrimEnd()
+        $newText = ($newLines -join "`n").TrimEnd()
+        if ($oldText -ne $newText) {
+            if (Test-Path $wslConfigPath) {
+                $backupDir = Get-BackupDirectory "wslconfig"
+                Copy-Item -Path $wslConfigPath -Destination (Join-Path $backupDir ".wslconfig") -Force
+                Write-Log "Backup .wslconfig сохранён: $backupDir"
+            }
+            Set-Content -Path $wslConfigPath -Value $newLines -Encoding ASCII
+            wsl.exe --shutdown | Out-Null
+        } else {
+            Write-Log ".wslconfig уже соответствует OmO-настройкам."
+        }
     } -PlanOnly:$PlanOnly
 }
 
 function Invoke-WslRoot {
-    param([string]$Command)
-    Invoke-Native "wsl.exe" @("-d", (Resolve-WslDistroName), "-u", "root", "--", "bash", "-lc", $Command)
+    param([string]$Script)
+    Invoke-WslScript -User "root" -Script $Script
 }
 
 function Invoke-WslUser {
-    param([string]$Command)
-    Invoke-Native "wsl.exe" @("-d", (Resolve-WslDistroName), "--", "bash", "-lc", $Command)
+    param([string]$User, [string]$Script)
+    Invoke-WslScript -User $User -Script $Script
 }
 
 function Ensure-WslDefaultUser {
     param([switch]$PlanOnly)
     $unixUser = Get-SanitizedWindowsUser
-    Invoke-Step "Создать default Unix user '$unixUser' из Windows whoami и подготовить sudo без пароля" {
-        Invoke-WslRoot "set -e; if ! id -u '$unixUser' >/dev/null 2>&1; then useradd -m -s /bin/bash -G sudo '$unixUser'; fi; passwd -d '$unixUser' >/dev/null 2>&1 || true; printf '%s ALL=(ALL) NOPASSWD:ALL\n' '$unixUser' > /etc/sudoers.d/90-omo-bootstrap-user; chmod 440 /etc/sudoers.d/90-omo-bootstrap-user"
+    $null = Invoke-Step "Создать default Unix user '$unixUser' из Windows whoami и подготовить sudo без пароля" {
+        $cmd = @"
+set -e
+unix_user='$unixUser'
+if ! id -u "`$unix_user" >/dev/null 2>&1; then
+    useradd -m -s /bin/bash -G sudo "`$unix_user"
+fi
+passwd -d "`$unix_user" >/dev/null 2>&1 || true
+printf '%s ALL=(ALL) NOPASSWD:ALL\n' "`$unix_user" > /etc/sudoers.d/90-omo-bootstrap-user
+chmod 440 /etc/sudoers.d/90-omo-bootstrap-user
+"@
+        Invoke-WslRoot $cmd
     } -PlanOnly:$PlanOnly
     return $unixUser
+}
+
+function Ensure-UbuntuInsightsConsent {
+    param([string]$UnixUser, [switch]$PlanOnly)
+    $state = if ($Script:UbuntuInsightsConsentState -eq "true") { "true" } else { "false" }
+    Invoke-Step "Настроить Ubuntu Insights consent для '$UnixUser' (state=$state)" {
+        $cmd = @"
+set -e
+state='$state'
+if command -v ubuntu-insights >/dev/null 2>&1; then
+    ubuntu-insights consent linux wsl_setup ubuntu_release_upgrader --state="`$state" >/dev/null 2>&1 || true
+fi
+"@
+        Invoke-WslUser -User $UnixUser -Script $cmd
+    } -PlanOnly:$PlanOnly
 }
 
 function Ensure-WslInsideConfig {
     param([switch]$PlanOnly)
     $unixUser = Get-SanitizedWindowsUser
-    $conf = @"
+    Invoke-Step "Настроить /etc/wsl.conf для systemd, interop, автомонтирования /mnt и default user '$unixUser'" {
+        $cmd = @"
+set -e
+cat > /etc/wsl.conf <<'WSLCONF'
 [boot]
 systemd=true
 
@@ -690,11 +898,46 @@ root=/mnt/
 
 [user]
 default=$unixUser
+WSLCONF
 "@
-    $escaped = $conf -replace "'", "'\''"
-    Invoke-Step "Настроить /etc/wsl.conf для systemd, interop, автомонтирования /mnt и default user '$unixUser'" {
-        Invoke-WslRoot "printf '%s\n' '$escaped' > /etc/wsl.conf"
+        Invoke-WslRoot $cmd
         wsl.exe --shutdown | Out-Null
+    } -PlanOnly:$PlanOnly
+}
+
+function Assert-WslBaseCapabilities {
+    param([switch]$PlanOnly)
+    Invoke-Step "Проверить базовые возможности Ubuntu/WSL" {
+        $resolved = Resolve-WslDistroName
+        if (-not (Test-WslDistroRunnable $resolved)) {
+            throw "WSL distro '$resolved' не запускается."
+        }
+        $wslVersion = Get-WslDistroWslVersion $resolved
+        if ([string]::IsNullOrWhiteSpace($wslVersion)) {
+            throw "Не удалось определить WSL-version для '$resolved' через wsl -l -v."
+        }
+        if ($wslVersion -ne "2") {
+            throw "Для OmO нужен WSL2, но '$resolved' сейчас WSL$wslVersion."
+        }
+        $osRelease = Get-WslOsRelease $resolved
+        if (-not $osRelease) {
+            throw "Не удалось прочитать /etc/os-release в '$resolved'."
+        }
+        $pretty = ""
+        if ($osRelease -match '(?m)^PRETTY_NAME="?([^"\n]+)"?') { $pretty = $matches[1].Trim() }
+        if ($pretty) { Write-Log "Ubuntu окружение: $pretty" }
+        $cmd = @'
+set -e
+test -r /etc/os-release
+command -v apt-get >/dev/null
+command -v systemctl >/dev/null
+if [ -d /run/systemd/system ]; then
+    echo "systemd active"
+else
+    echo "systemd not active yet; service file can still be written"
+fi
+'@
+        Invoke-WslRoot $cmd
     } -PlanOnly:$PlanOnly
 }
 
@@ -705,43 +948,70 @@ function Ensure-WslPackagesAndOpenCode {
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y ca-certificates curl git nodejs npm procps iproute2
+apt-get install -y ca-certificates curl git nodejs npm procps iproute2 tar
 
-if ! command -v opencode >/dev/null 2>&1 && [ ! -x /root/.opencode/bin/opencode ]; then
-    curl -fsSL https://opencode.ai/install | bash || npm install -g opencode-ai
-fi
+install_opencode() {
+    curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path
+}
 
-opencode_bin=""
-for candidate in /usr/local/bin/opencode /root/.opencode/bin/opencode /root/.local/bin/opencode /root/.local/share/opencode/bin/opencode; do
-    if [ -f "$candidate" ] || [ -L "$candidate" ]; then
+managed_dir=/usr/local/lib/omo-opencode
+managed_bin="$managed_dir/opencode"
+
+find_opencode() {
+    for candidate in /usr/local/bin/opencode "$managed_bin" /root/.opencode/bin/opencode /root/.local/bin/opencode /root/.local/share/opencode/bin/opencode; do
+        if [ -f "$candidate" ] || [ -L "$candidate" ]; then
+            chmod +x "$candidate" 2>/dev/null || true
+        fi
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    candidate="$(command -v opencode 2>/dev/null || true)"
+    if [ -n "$candidate" ]; then
         chmod +x "$candidate" 2>/dev/null || true
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
     fi
-    if [ -x "$candidate" ]; then
-        opencode_bin="$candidate"
-        break
+    candidate="$(find /root /usr/local /opt -maxdepth 7 \( -type f -o -type l \) -name opencode 2>/dev/null | head -1 || true)"
+    if [ -n "$candidate" ]; then
+        chmod +x "$candidate" 2>/dev/null || true
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
     fi
-done
-if [ -z "$opencode_bin" ]; then
-    opencode_bin="$(bash -lc 'command -v opencode' 2>/dev/null || true)"
+    return 1
+}
+
+if ! command -v opencode >/dev/null 2>&1 && [ ! -x "$managed_bin" ] && [ ! -x /root/.opencode/bin/opencode ]; then
+    install_opencode
 fi
+
+opencode_bin="$(find_opencode || true)"
 if [ -z "$opencode_bin" ]; then
-    opencode_bin="$(find /root /usr/local /opt -maxdepth 7 \( -type f -o -type l \) -name opencode 2>/dev/null | head -1 || true)"
-    if [ -n "$opencode_bin" ]; then
-        chmod +x "$opencode_bin" 2>/dev/null || true
-    fi
+    install_opencode
+    opencode_bin="$(find_opencode || true)"
 fi
+
 if [ -z "$opencode_bin" ] || [ ! -x "$opencode_bin" ]; then
     echo "ERROR: opencode binary not found after install" >&2
     echo "Diagnostic candidates:" >&2
     find /root /usr/local /opt -maxdepth 7 \( -name opencode -o -name '*opencode*' \) -print 2>/dev/null | head -100 >&2 || true
     exit 30
 fi
-if [ "$opencode_bin" != /usr/local/bin/opencode ]; then
-    ln -sf "$opencode_bin" /usr/local/bin/opencode
+mkdir -p "$managed_dir"
+if [ "$(readlink -f "$opencode_bin" 2>/dev/null || printf '%s' "$opencode_bin")" != "$managed_bin" ]; then
+    cp "$opencode_bin" "$managed_bin.tmp"
+    chmod 755 "$managed_bin.tmp"
+    mv "$managed_bin.tmp" "$managed_bin"
 fi
-chmod +x "$opencode_bin" /usr/local/bin/opencode
+chmod 755 "$managed_bin"
+ln -sf "$managed_bin" /usr/local/bin/opencode
 cat > /etc/profile.d/opencode.sh <<'PROFILE'
-export PATH=/usr/local/bin:/root/.opencode/bin:$PATH
+export PATH=/usr/local/bin:$PATH
 PROFILE
 /usr/local/bin/opencode --version
 '@
@@ -749,44 +1019,67 @@ PROFILE
     } -PlanOnly:$PlanOnly
 }
 
+function Assert-WslToolCapabilities {
+    param([string]$UnixUser, [switch]$PlanOnly)
+    Invoke-Step "Проверить инструменты WSL для OmO" {
+        $cmd = @'
+set -e
+for tool in curl git node npm; do
+    command -v "$tool" >/dev/null
+done
+test -x /usr/local/bin/opencode
+/usr/local/bin/opencode --version
+'@
+        Invoke-WslRoot $cmd
+        if (-not [string]::IsNullOrWhiteSpace($UnixUser)) {
+            Invoke-WslUser -User $UnixUser -Script @'
+set -e
+test -x /usr/local/bin/opencode
+/usr/local/bin/opencode --version
+'@
+        }
+    } -PlanOnly:$PlanOnly
+}
+
 function Ensure-WslOpenCodeConfig {
-    param([switch]$PlanOnly)
-    $unixUser = Get-SanitizedWindowsUser
-    $config = @'
+    param([string]$UnixUser, [switch]$PlanOnly)
+    $effectiveUnixUser = if ($UnixUser) { $UnixUser } else { Get-SanitizedWindowsUser }
+    Invoke-Step "Создать минимальный конфиг OpenCode для '$effectiveUnixUser', если его ещё нет" {
+        $cmd = @'
+set -e
+unix_user='__UNIX_USER__'
+if ! id -u "$unix_user" >/dev/null 2>&1; then
+    echo "ERROR: Unix user '$unix_user' does not exist" >&2
+    exit 34
+fi
+user_home="$(getent passwd "$unix_user" | cut -d: -f6)"
+mkdir -p "$user_home/.config/opencode"
+if [ ! -f "$user_home/.config/opencode/opencode.jsonc" ] && [ ! -f "$user_home/.config/opencode/opencode.json" ]; then
+    cat > "$user_home/.config/opencode/opencode.jsonc" <<'JSON'
 {
   "$schema": "https://opencode.ai/config.json",
   "provider": {},
   "plugin": []
 }
-'@
-    $escaped = $config -replace "'", "'\''"
-    Invoke-Step "Создать минимальный конфиг OpenCode, если его ещё нет" {
-        $cmd = @'
-set -e
-unix_user='__UNIX_USER__'
-config='__CONFIG__'
-mkdir -p /root/.config/opencode
-test -f /root/.config/opencode/opencode.jsonc || printf '%s\n' "$config" > /root/.config/opencode/opencode.jsonc
-if id -u "$unix_user" >/dev/null 2>&1; then
-    user_home="$(getent passwd "$unix_user" | cut -d: -f6)"
-    mkdir -p "$user_home/.config/opencode"
-    test -f "$user_home/.config/opencode/opencode.jsonc" || printf '%s\n' "$config" > "$user_home/.config/opencode/opencode.jsonc"
-    chown -R "$unix_user:$unix_user" "$user_home/.config"
+JSON
 fi
+chown -R "$unix_user:$unix_user" "$user_home/.config/opencode"
 '@
-        $cmd = $cmd.Replace("__UNIX_USER__", $unixUser).Replace("__CONFIG__", $escaped)
+        $cmd = $cmd.Replace("__UNIX_USER__", $effectiveUnixUser)
         Invoke-WslRoot $cmd
     } -PlanOnly:$PlanOnly
 }
 
 function Ensure-OpenCodeSystemdService {
-    param([string]$WslRepoPath, [switch]$PlanOnly)
+    param([string]$WslRepoPath, [string]$UnixUser, [switch]$PlanOnly)
     $safeRepo = $WslRepoPath -replace "'", "'\''"
-    Invoke-Step "Создать и, если systemd активен, запустить opencode-serve.service" {
+    $effectiveUnixUser = if ($UnixUser) { $UnixUser } else { Get-SanitizedWindowsUser }
+    Invoke-Step "Создать и, если systemd активен, запустить opencode-serve.service от '$effectiveUnixUser'" {
         $cmd = @'
 set -e
 repo_path='__WSL_REPO__'
 opencode_port='__OPENCODE_PORT__'
+unix_user='__UNIX_USER__'
 opencode_bin="$(command -v opencode || true)"
 if [ -z "$opencode_bin" ] && [ -x /usr/local/bin/opencode ]; then
     opencode_bin=/usr/local/bin/opencode
@@ -795,6 +1088,13 @@ if [ -z "$opencode_bin" ]; then
     echo "ERROR: opencode is not in PATH for service setup" >&2
     exit 31
 fi
+if ! id -u "$unix_user" >/dev/null 2>&1; then
+    echo "ERROR: Unix user '$unix_user' does not exist" >&2
+    exit 34
+fi
+user_home="$(getent passwd "$unix_user" | cut -d: -f6)"
+mkdir -p "$user_home/.local/state/omo"
+chown -R "$unix_user:$unix_user" "$user_home/.local"
 cat > /etc/systemd/system/opencode-serve.service <<SVC
 [Unit]
 Description=OpenCode headless server
@@ -803,11 +1103,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=root
-Group=root
+User=$unix_user
+Group=$unix_user
 WorkingDirectory=$repo_path
-Environment=HOME=/root
-Environment=XDG_CONFIG_HOME=/root/.config
+Environment=HOME=$user_home
+Environment=XDG_CONFIG_HOME=$user_home/.config
 ExecStart=/usr/local/bin/opencode serve --hostname 0.0.0.0 --port $opencode_port
 Restart=on-failure
 RestartSec=5s
@@ -824,20 +1124,39 @@ else
     echo "systemd is not active yet; service file was written, one-shot serve will be used now"
 fi
 '@
-        $cmd = $cmd.Replace("__WSL_REPO__", $safeRepo).Replace("__OPENCODE_PORT__", [string]$OpenCodePort)
+        $cmd = $cmd.Replace("__WSL_REPO__", $safeRepo).Replace("__OPENCODE_PORT__", [string]$OpenCodePort).Replace("__UNIX_USER__", $effectiveUnixUser)
         Invoke-WslRoot $cmd
     } -PlanOnly:$PlanOnly
 }
 
 function Start-OpenCodeServe {
-    param([string]$WslRepoPath, [switch]$PlanOnly)
+    param([string]$WslRepoPath, [string]$UnixUser, [switch]$PlanOnly)
     $safeRepo = $WslRepoPath -replace "'", "'\''"
-    Invoke-Step "Запустить разовый OpenCode web server в WSL для проекта $WslRepoPath" {
+    $effectiveUnixUser = if ($UnixUser) { $UnixUser } else { Get-SanitizedWindowsUser }
+    Invoke-Step "Запустить разовый OpenCode web server в WSL для проекта $WslRepoPath от '$effectiveUnixUser'" {
+        $cleanupCmd = @'
+set -e
+opencode_port='__OPENCODE_PORT__'
+unix_user='__UNIX_USER__'
+if command -v ss >/dev/null 2>&1; then
+    pids="$(ss -H -tlnp "sport = :$opencode_port" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u || true)"
+    for pid in $pids; do
+        owner="$(ps -o user= -p "$pid" 2>/dev/null | awk '{print $1}' || true)"
+        args="$(ps -o args= -p "$pid" 2>/dev/null || true)"
+        if [ "$owner" != "$unix_user" ] && printf '%s\n' "$args" | grep -qi opencode; then
+            kill "$pid" 2>/dev/null || true
+        fi
+    done
+fi
+'@
+        $cleanupCmd = $cleanupCmd.Replace("__OPENCODE_PORT__", [string]$OpenCodePort).Replace("__UNIX_USER__", $effectiveUnixUser)
+        Invoke-WslRoot $cleanupCmd
+
         $cmd = @'
 set -e
 repo_path='__WSL_REPO__'
 opencode_port='__OPENCODE_PORT__'
-mkdir -p /root/.local/state/omo
+mkdir -p "$HOME/.local/state/omo"
 cd "$repo_path"
 opencode_bin="$(command -v opencode || true)"
 if [ -z "$opencode_bin" ]; then
@@ -850,25 +1169,26 @@ fi
 if ss -tln 2>/dev/null | grep -q ":$opencode_port "; then
     echo "OpenCode already listens on port $opencode_port"
 else
-    nohup "$opencode_bin" serve --hostname 0.0.0.0 --port "$opencode_port" > /root/.local/state/omo/opencode-serve.log 2>&1 &
+    nohup "$opencode_bin" serve --hostname 0.0.0.0 --port "$opencode_port" > "$HOME/.local/state/omo/opencode-serve.log" 2>&1 &
 fi
 sleep 4
 if ! ss -tln 2>/dev/null | grep -q ":$opencode_port "; then
     echo "ERROR: OpenCode did not start listening on port $opencode_port" >&2
-    tail -120 /root/.local/state/omo/opencode-serve.log >&2 || true
+    tail -120 "$HOME/.local/state/omo/opencode-serve.log" >&2 || true
     exit 33
 fi
 curl -fsS --max-time 5 "http://127.0.0.1:$opencode_port/" >/dev/null
 '@
         $cmd = $cmd.Replace("__WSL_REPO__", $safeRepo).Replace("__OPENCODE_PORT__", [string]$OpenCodePort)
-        Invoke-WslRoot $cmd
+        Invoke-WslUser -User $effectiveUnixUser -Script $cmd
     } -PlanOnly:$PlanOnly
 }
 
 function Get-WslIp {
     try {
-        $ip = (& wsl.exe -d (Resolve-WslDistroName) -- bash -lc "hostname -I | cut -d' ' -f1" 2>$null).Trim()
-        if ($ip) { return $ip }
+        $raw = Normalize-WslOutput ((& wsl.exe -d (Resolve-WslDistroName) -- hostname -I 2>$null) -join " ")
+        $ip = (($raw -split "\s+") | Where-Object { $_ } | Select-Object -First 1)
+        if ($ip) { return $ip.Trim() }
     } catch {}
     return "127.0.0.1"
 }
@@ -883,9 +1203,7 @@ function Ensure-PortProxy {
         $netsh = Join-Path $env:WINDIR "System32\netsh.exe"
         & $netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=$OpenCodePort | Out-Null
         & $netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=$OpenCodePort connectaddress=$wslIp connectport=$OpenCodePort | Out-Null
-        if (-not (Get-NetFirewallRule -DisplayName "OmO OpenCode local web" -ErrorAction SilentlyContinue)) {
-            New-NetFirewallRule -DisplayName "OmO OpenCode local web" -Direction Inbound -Action Allow -Protocol TCP -LocalPort $OpenCodePort -Profile Private,Domain | Out-Null
-        }
+        Get-NetFirewallRule -DisplayName "OmO OpenCode local web" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
         $curl = Join-Path $env:WINDIR "System32\curl.exe"
         if (Test-Path $curl) {
             & $curl -fsS --max-time 8 "http://127.0.0.1:$OpenCodePort/" | Out-Null
@@ -920,16 +1238,25 @@ function Run-Install {
         if (-not $PlanOnly) { Mark-Checkpoint $state "repo" "present" $target }
 
         Ensure-WSLBase -PlanOnly:$PlanOnly
+        Ensure-UbuntuInsightsWindowsDefault -PlanOnly:$PlanOnly
         Ensure-Ubuntu -PlanOnly:$PlanOnly
-        Ensure-WslDefaultUser -PlanOnly:$PlanOnly | Out-Null
+        $unixUser = Ensure-WslDefaultUser -PlanOnly:$PlanOnly
+        Ensure-UbuntuInsightsConsent -UnixUser $unixUser -PlanOnly:$PlanOnly
         Ensure-WslConfig -PlanOnly:$PlanOnly
         Ensure-WslInsideConfig -PlanOnly:$PlanOnly
-        if (-not $PlanOnly) { Mark-Checkpoint $state "wsl" "present" $DistroName }
+        Assert-WslBaseCapabilities -PlanOnly:$PlanOnly
+        $actualDistro = if ($PlanOnly) { $DistroName } else { Resolve-WslDistroName }
+        $state["distro"] = $actualDistro
+        if (-not $PlanOnly) {
+            Save-State $state
+            Mark-Checkpoint $state "wsl" "present" $actualDistro
+        }
 
         Ensure-WslPackagesAndOpenCode -PlanOnly:$PlanOnly
-        Ensure-WslOpenCodeConfig -PlanOnly:$PlanOnly
-        Ensure-OpenCodeSystemdService -WslRepoPath $wslRepo -PlanOnly:$PlanOnly
-        Start-OpenCodeServe -WslRepoPath $wslRepo -PlanOnly:$PlanOnly
+        Assert-WslToolCapabilities -UnixUser $unixUser -PlanOnly:$PlanOnly
+        Ensure-WslOpenCodeConfig -UnixUser $unixUser -PlanOnly:$PlanOnly
+        Ensure-OpenCodeSystemdService -WslRepoPath $wslRepo -UnixUser $unixUser -PlanOnly:$PlanOnly
+        Start-OpenCodeServe -WslRepoPath $wslRepo -UnixUser $unixUser -PlanOnly:$PlanOnly
         Ensure-PortProxy -PlanOnly:$PlanOnly
         if (-not $PlanOnly) { Mark-Checkpoint $state "opencode_web" "present" "http://127.0.0.1:$OpenCodePort/" }
 
@@ -946,9 +1273,12 @@ function Run-Install {
 function Show-Pause {
     param([switch]$IsError)
     if ($Mode -eq "Menu") { return }
+    if ([Environment]::CommandLine -match '(?i)(^|\s)-NonInteractive(\s|$)' -or [Console]::IsInputRedirected) { return }
     Write-Host ""
     if ($IsError) { Write-Host "Нажмите любую клавишу для выхода..." }
-    $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    try {
+        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    } catch {}
 }
 
 function Show-Status {
@@ -974,16 +1304,20 @@ function Show-Status {
 function Repair-Bootstrap {
     $target = Get-DefaultTargetPath
     Write-Log "Ремонт использует целевую папку: $target"
+    Ensure-UbuntuInsightsWindowsDefault
     Ensure-Ubuntu
-    Ensure-WslDefaultUser | Out-Null
+    $unixUser = Ensure-WslDefaultUser
+    Ensure-UbuntuInsightsConsent -UnixUser $unixUser
     Ensure-WslConfig
     Ensure-WslInsideConfig
+    Assert-WslBaseCapabilities
     if (Test-Path $target) {
         $wslRepo = Convert-ToWslPath $target
         Ensure-WslPackagesAndOpenCode
-        Ensure-WslOpenCodeConfig
-        Ensure-OpenCodeSystemdService -WslRepoPath $wslRepo
-        Start-OpenCodeServe -WslRepoPath $wslRepo
+        Assert-WslToolCapabilities -UnixUser $unixUser
+        Ensure-WslOpenCodeConfig -UnixUser $unixUser
+        Ensure-OpenCodeSystemdService -WslRepoPath $wslRepo -UnixUser $unixUser
+        Start-OpenCodeServe -WslRepoPath $wslRepo -UnixUser $unixUser
         Ensure-PortProxy
     }
 }
@@ -1020,6 +1354,10 @@ function Show-Menu {
 }
 
 try {
+    if ($Help) {
+        Show-Help
+        return
+    }
     switch ($Mode) {
         "Menu" { Show-Menu; return }
         "Install" { Run-Install; Show-Pause; return }
