@@ -15,6 +15,10 @@
 *.log
 *.tmp
 *.bak
+*.zip
+*.rar
+*.tar*
+*.gz*
 Thumbs.db
 .DS_Store
 node_modules/
