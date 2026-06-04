@@ -44,7 +44,10 @@ run_templates() {
 }
 
 run_script_safety() {
+    assert_file "bootstrap-for-human/omo_host_bootstrap.cmd"
     assert_file "bootstrap-for-human/omo_bootstrap.sh"
+    assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "cscript.exe"
+    assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "netsh.exe interface portproxy"
     for f in check-health.sh check-config.sh backup-omostack.sh cleanup-temp.sh \
              repair-cache.sh check-scaffold.sh OOBE-setup.sh diagnostic.sh; do
         assert_file ".agent-docs/scripts/$f"
@@ -59,6 +62,11 @@ run_script_safety() {
         failures+=("legacy .ps1 scripts found under .agent-docs/scripts")
     else
         echo "PASS no legacy .ps1 scripts under .agent-docs/scripts"
+    fi
+    if find "${repo_root}/bootstrap-for-human" -maxdepth 1 -name '*.ps1' | grep -q .; then
+        failures+=("PowerShell bootstrap files found under bootstrap-for-human")
+    else
+        echo "PASS no PowerShell bootstrap files under bootstrap-for-human"
     fi
 
     local diag_tmp

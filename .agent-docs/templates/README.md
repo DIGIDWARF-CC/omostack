@@ -18,7 +18,7 @@ Files:
 
 | Script | Purpose |
 |--------|---------|
-| `OOBE-setup.sh` | Stage-2 WSL/Linux agent setup after Windows bootstrap |
+| `OOBE-setup.sh` | Stage-2 WSL/Linux agent setup after the host bootstrap |
 | `check-health.sh` | Non-destructive tool availability check (`--dry-run`) |
 | `check-config.sh` | Config collision and plugin naming audit (`--dry-run`) |
 | `check-scaffold.sh` | Repo structure verification (`--all` or specific checks) |

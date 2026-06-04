@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stage-2 OOBE setup for agents running inside WSL/Linux.
-# Human bootstrap starts from bootstrap-for-human/omo_bootstrap.sh.
+# Human bootstrap starts from bootstrap-for-human/omo_host_bootstrap.cmd.
 set -euo pipefail
 
 AUTO=false
@@ -102,7 +102,7 @@ if command -v npm >/dev/null 2>&1; then
         log "  missing: comment-checker; optional"
     fi
 else
-    log "  missing: npm; Windows bootstrap should install Node/npm in WSL first"
+    log "  missing: npm; Ubuntu OOBE stage should install Node/npm first"
 fi
 
 log "[3/7] OpenCode config"
@@ -138,7 +138,7 @@ if [ -z "$opencode_bin" ]; then
     log "  missing: opencode binary; skip service setup"
 elif [ "$(id -u)" -ne 0 ]; then
     log "  missing permission: root is required to create $service_file"
-    log "  action: run this stage through the Windows bootstrap or rerun inside WSL as root"
+    log "  action: run the Ubuntu OOBE stage through the Windows host bootstrap or rerun inside WSL as root"
 elif [ "$DRY_RUN" = true ]; then
     log "[dry-run] write $service_file"
     log "[dry-run] systemctl daemon-reload && systemctl enable --now opencode-serve.service"

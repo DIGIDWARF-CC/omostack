@@ -11,13 +11,12 @@ Use this file first when an agent opens this omostack home.
 - OpenCode runtime state is ignored under `.omo/`.
 - **Target environment: WSL/Linux (Bash scripts, XDG paths).**
 
-## 2. New Install? Confirm Human Bootstrap First
+## 2. New Install? Confirm Host Bootstrap First
 
-If this is a fresh clone of the repository, the human-facing first step is generic Ubuntu WSL plus the root-only shell bootstrap:
+If this is a fresh clone of the repository, the human-facing first step is the Windows host bootstrap from an elevated Command Prompt:
 
-```bash
-wget -O /tmp/omo_bootstrap.sh https://raw.githubusercontent.com/DIGIDWARF-CC/omostack/main/bootstrap-for-human/omo_bootstrap.sh
-sudo bash /tmp/omo_bootstrap.sh --target /mnt/s/FastNeuros/omo
+```cmd
+bootstrap-for-human\omo_host_bootstrap.cmd /mode install /target C:\AI\omostack /port 4096
 ```
 
 After that, agents run stage-2:

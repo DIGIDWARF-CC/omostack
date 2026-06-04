@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# omo_bootstrap.sh - root-only Ubuntu WSL bootstrap for OmO.
+# omo_bootstrap.sh - root-only Ubuntu WSL stage for OmO.
 set -Eeuo pipefail
 IFS=$'\n\t'
 
@@ -7,47 +7,46 @@ DEFAULT_REPO_URL="https://github.com/DIGIDWARF-CC/omostack.git"
 DEFAULT_PORT="4096"
 DEFAULT_TARGET="/mnt/c/AI/omostack"
 
+MODE="install"
 YES=0
 DRY_RUN=0
+HOST_MANAGED=0
 TARGET_PATH="${OMO_TARGET_PATH:-}"
 REPO_URL="${OMO_REPO_URL:-$DEFAULT_REPO_URL}"
 PORT="${OMO_PORT:-$DEFAULT_PORT}"
 
 STATE_DIR="/root/.local/state/omo-bootstrap"
 OMO_STATE_DIR="/root/.local/state/omo"
-BACKUP_DIR=""
-LOG_FILE=""
-STATE_FILE=""
-RESTART_REQUIRED=0
-WINDOWS_BUILD="unknown"
-WINDOWS_VERSION="unknown"
-WINDOWS_NETWORK_MODE="unknown"
-
-WIN_SYSTEM32="/mnt/c/Windows/System32"
-CMD_EXE="$WIN_SYSTEM32/cmd.exe"
-CURL_EXE="$WIN_SYSTEM32/curl.exe"
-NETSH_EXE="$WIN_SYSTEM32/netsh.exe"
+STATUS_JSON="$STATE_DIR/host-status.json"
+LOG_FILE="$STATE_DIR/bootstrap.log"
+BACKUP_DIR="$STATE_DIR/backups/$(date -u +%Y%m%dT%H%M%SZ)"
 
 usage() {
     cat <<EOF
 Usage: sudo bash bootstrap-for-human/omo_bootstrap.sh [options]
 
 Options:
-  --target PATH    OmO checkout path inside WSL, default: $DEFAULT_TARGET
-  --repo URL       Git repository URL, default: $DEFAULT_REPO_URL
-  --port PORT      OpenCode serve port, default: $DEFAULT_PORT
+  --mode MODE      install, repair, or status. Default: install
+  --target PATH    OmO checkout path inside WSL. Default: $DEFAULT_TARGET
+  --repo URL       Git repository URL. Default: $DEFAULT_REPO_URL
+  --port PORT      OpenCode serve port. Default: $DEFAULT_PORT
+  --status-json P  Status JSON path for the Windows host component
+  --host-managed   Called by omo_host_bootstrap.cmd
   --yes, -y        Use defaults without interactive prompts
-  --dry-run        Print planned actions without mutating system files
+  --dry-run        Print planned Ubuntu actions without mutating Ubuntu
   --help, -h       Show this help
 
-This bootstrap is intentionally root-only and Ubuntu WSL-only. It expects a
-pre-created Ubuntu WSL distro with /etc/wsl.conf present, then configures the
-Ubuntu side plus Windows WSL networking through WSL interop.
+This is the Ubuntu-side stage only. Windows WSL setup, .wslconfig, registry,
+and portproxy are owned by omo_host_bootstrap.cmd.
 EOF
 }
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --mode)
+            MODE="${2:-}"
+            shift 2
+            ;;
         --target)
             TARGET_PATH="${2:-}"
             shift 2
@@ -59,6 +58,14 @@ while [ $# -gt 0 ]; do
         --port)
             PORT="${2:-}"
             shift 2
+            ;;
+        --status-json)
+            STATUS_JSON="${2:-}"
+            shift 2
+            ;;
+        --host-managed)
+            HOST_MANAGED=1
+            shift
             ;;
         --yes|-y)
             YES=1
@@ -80,21 +87,37 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+case "$MODE" in
+    install|repair|status) ;;
+    *) echo "Invalid --mode value: $MODE" >&2; exit 2 ;;
+esac
+
 if ! printf '%s' "$PORT" | grep -Eq '^[0-9]+$' || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
     echo "Invalid --port value: $PORT" >&2
     exit 2
 fi
 
-if [ "$DRY_RUN" -eq 1 ]; then
+if [ "$MODE" = "status" ]; then
+    LOG_FILE="/dev/null"
+elif [ "$DRY_RUN" -eq 1 ]; then
     STATE_DIR="${TMPDIR:-/tmp}/omo-bootstrap-dry-run"
+    OMO_STATE_DIR="${TMPDIR:-/tmp}/omo-dry-run"
+    STATUS_JSON="$STATE_DIR/host-status.json"
+    LOG_FILE="$STATE_DIR/bootstrap.log"
+    BACKUP_DIR="$STATE_DIR/backups/$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p "$STATE_DIR"
+else
+    mkdir -p "$STATE_DIR"
 fi
-BACKUP_DIR="$STATE_DIR/backups/$(date -u +%Y%m%dT%H%M%SZ)"
-LOG_FILE="$STATE_DIR/bootstrap.log"
-STATE_FILE="$STATE_DIR/state.json"
-mkdir -p "$STATE_DIR"
 
 log() {
-    printf '%s %s\n' "$(date -Iseconds)" "$*" | tee -a "$LOG_FILE"
+    local line
+    line="$(printf '%s %s\n' "$(date -Iseconds)" "$*")"
+    if [ "$MODE" = "status" ]; then
+        printf '%s\n' "$line" >&2
+    else
+        printf '%s\n' "$line" | tee -a "$LOG_FILE"
+    fi
 }
 
 warn() {
@@ -131,6 +154,10 @@ run() {
     local desc="$1"
     shift
     try_run "$desc" "$@" || die "$desc failed"
+}
+
+json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g'
 }
 
 backup_file() {
@@ -172,19 +199,33 @@ install_text_file() {
     log "Updated $path"
 }
 
-json_escape() {
-    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+write_generated_file() {
+    local path="$1"
+    local tmp
+    tmp="$(mktemp)"
+    cat > "$tmp"
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "[dry-run] write $path"
+        rm -f "$tmp"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$path")"
+    install -m 0644 "$tmp" "$path"
+    rm -f "$tmp"
+    log "Updated $path"
 }
 
 require_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        die "Run this bootstrap as root inside Ubuntu WSL: sudo bash bootstrap-for-human/omo_bootstrap.sh"
+        die "Run this stage as root inside Ubuntu WSL."
     fi
 }
 
-require_ubuntu_wsl_marker() {
+require_ubuntu_wsl() {
     if [ ! -f /etc/wsl.conf ]; then
-        die "This bootstrap is only for an already provisioned Ubuntu WSL install. /etc/wsl.conf is missing; install Ubuntu under WSL first, create /etc/wsl.conf, restart WSL, then rerun."
+        die "This stage is only for an already provisioned Ubuntu WSL install. /etc/wsl.conf is missing."
     fi
 
     if [ ! -r /etc/os-release ]; then
@@ -194,7 +235,7 @@ require_ubuntu_wsl_marker() {
     # shellcheck disable=SC1091
     . /etc/os-release
     if [ "${ID:-}" != "ubuntu" ]; then
-        die "This bootstrap supports Ubuntu WSL only. Detected ID=${ID:-unknown}."
+        die "This stage supports Ubuntu WSL only. Detected ID=${ID:-unknown}."
     fi
 
     if ! grep -qiE 'microsoft|wsl' /proc/sys/kernel/osrelease 2>/dev/null && [ -z "${WSL_DISTRO_NAME:-}" ]; then
@@ -262,144 +303,8 @@ EOF
 }
 
 interop_available() {
-    [ -x "$CMD_EXE" ] || return 1
-    "$CMD_EXE" /d /c ver >/dev/null 2>&1
-}
-
-require_interop() {
-    if interop_available; then
-        log "Windows interop is available."
-        return 0
-    fi
-
-    warn "Windows interop is not available yet. /etc/wsl.conf has been configured with interop enabled."
-    warn "Run this from Windows, then start Ubuntu again and rerun this bootstrap:"
-    warn "  wsl.exe --shutdown"
-    exit 20
-}
-
-windows_cmd() {
-    "$CMD_EXE" /d /c "$*" 2>/dev/null | tr -d '\r'
-}
-
-detect_windows() {
-    local ver_line
-    ver_line="$(windows_cmd ver | sed '/^[[:space:]]*$/d' | sed -n '1p' || true)"
-    WINDOWS_VERSION="$(printf '%s\n' "$ver_line" | grep -Eo '[0-9]+([.][0-9]+)+' | head -1)"
-    [ -n "$WINDOWS_VERSION" ] || WINDOWS_VERSION="unknown"
-    WINDOWS_BUILD="$(printf '%s' "$WINDOWS_VERSION" | awk -F. '{ if (NF >= 3) print $3; else print $NF }')"
-    if ! printf '%s' "$WINDOWS_BUILD" | grep -Eq '^[0-9]+$'; then
-        WINDOWS_BUILD="0"
-    fi
-
-    if [ "$WINDOWS_BUILD" -ge 22621 ]; then
-        WINDOWS_NETWORK_MODE="mirrored"
-    else
-        WINDOWS_NETWORK_MODE="best-effort"
-    fi
-    log "Windows version: $WINDOWS_VERSION (build $WINDOWS_BUILD); WSL networking mode: $WINDOWS_NETWORK_MODE"
-}
-
-update_wslconfig_content() {
-    local source_file="$1"
-    local dest_file="$2"
-    local mode="$3"
-    local desired remove_re
-
-    remove_re='^(localhostforwarding|dnstunneling|autoproxy|networkingmode|firewall)$'
-    if [ "$mode" = "mirrored" ]; then
-        desired=$'dnsTunneling=true\nautoProxy=true\nnetworkingMode=mirrored\nfirewall=true'
-    else
-        desired=$'localhostForwarding=true'
-    fi
-
-    awk -v desired="$desired" -v remove_re="$remove_re" '
-        function trim(s) { gsub(/^[ \t]+|[ \t]+$/, "", s); return s }
-        function emit_desired() {
-            if (in_wsl2 && !emitted) {
-                print desired
-                emitted = 1
-            }
-        }
-        BEGIN {
-            in_wsl2 = 0
-            found_wsl2 = 0
-            emitted = 0
-        }
-        /^[ \t]*\[[^]]+\][ \t]*$/ {
-            if (in_wsl2) emit_desired()
-            section = tolower($0)
-            gsub(/^[ \t]*\[/, "", section)
-            gsub(/\][ \t]*$/, "", section)
-            in_wsl2 = (section == "wsl2")
-            if (in_wsl2) {
-                found_wsl2 = 1
-                emitted = 0
-            }
-            print
-            next
-        }
-        in_wsl2 && /^[ \t]*[^#;][^=]*=/ {
-            key = $0
-            sub(/=.*/, "", key)
-            key = tolower(trim(key))
-            if (key ~ remove_re) next
-        }
-        { print }
-        END {
-            if (in_wsl2) emit_desired()
-            if (!found_wsl2) {
-                if (NR > 0) print ""
-                print "[wsl2]"
-                print desired
-            }
-        }
-    ' "$source_file" > "$dest_file"
-}
-
-ensure_windows_wslconfig() {
-    local user_profile user_profile_wsl wslconfig tmp source
-    user_profile="$(windows_cmd 'echo %USERPROFILE%' | sed -n '1p')"
-    if [ -z "$user_profile" ]; then
-        warn "Cannot resolve Windows USERPROFILE; skipping .wslconfig update."
-        return 0
-    fi
-
-    if ! user_profile_wsl="$(win_to_wsl_path "$user_profile")"; then
-        warn "Cannot convert Windows USERPROFILE to WSL path: $user_profile"
-        return 0
-    fi
-
-    wslconfig="$user_profile_wsl/.wslconfig"
-    tmp="$(mktemp)"
-    source="$(mktemp)"
-    if [ -f "$wslconfig" ]; then
-        cp "$wslconfig" "$source"
-    else
-        : > "$source"
-    fi
-
-    update_wslconfig_content "$source" "$tmp" "$WINDOWS_NETWORK_MODE"
-    rm -f "$source"
-
-    if [ -f "$wslconfig" ] && cmp -s "$tmp" "$wslconfig"; then
-        log "Windows .wslconfig already matches OmO networking keys."
-        rm -f "$tmp"
-        return 0
-    fi
-
-    backup_file "$wslconfig"
-    if [ "$DRY_RUN" -eq 1 ]; then
-        log "[dry-run] write $wslconfig"
-        rm -f "$tmp"
-        return 0
-    fi
-
-    mkdir -p "$(dirname "$wslconfig")"
-    install -m 0644 "$tmp" "$wslconfig"
-    rm -f "$tmp"
-    RESTART_REQUIRED=1
-    log "Updated Windows .wslconfig: $wslconfig"
+    [ -x /mnt/c/Windows/System32/cmd.exe ] || return 1
+    /mnt/c/Windows/System32/cmd.exe /d /c ver >/dev/null 2>&1
 }
 
 ensure_apt_packages() {
@@ -408,7 +313,7 @@ ensure_apt_packages() {
         ca-certificates curl git nodejs npm procps iproute2 tar coreutils
 }
 
-ensure_repo() {
+ensure_repo_install() {
     local parent
     parent="$(dirname "$TARGET_PATH")"
     if [ -d "$TARGET_PATH/.git" ]; then
@@ -420,6 +325,13 @@ ensure_repo() {
     fi
     run "Create OmO parent directory" mkdir -p "$parent"
     run "Clone OmO repository" git clone "$REPO_URL" "$TARGET_PATH"
+}
+
+require_repo_for_repair() {
+    if [ ! -d "$TARGET_PATH/.git" ]; then
+        die "Repair mode requires an existing OmO git checkout at $TARGET_PATH. Run install first."
+    fi
+    log "OmO repository present: $TARGET_PATH"
 }
 
 discover_opencode() {
@@ -570,9 +482,18 @@ EOF
     fi
 }
 
+listener_status() {
+    if ss -H -tln 2>/dev/null | awk -v suffix=":$PORT" '$4 ~ suffix "$" { found = 1 } END { exit found ? 0 : 1 }'; then
+        printf 'true'
+    else
+        printf 'false'
+    fi
+}
+
 verify_linux_listener() {
+    local _
     for _ in $(seq 1 20); do
-        if ss -H -tln 2>/dev/null | awk -v suffix=":$PORT" '$4 ~ suffix "$" { found = 1 } END { exit found ? 0 : 1 }'; then
+        if [ "$(listener_status)" = "true" ]; then
             log "OpenCode is listening inside Ubuntu on port $PORT."
             return 0
         fi
@@ -582,101 +503,114 @@ verify_linux_listener() {
     return 1
 }
 
-windows_curl_ok() {
-    [ -x "$CURL_EXE" ] || return 1
-    "$CURL_EXE" -fsS --max-time 8 "http://127.0.0.1:$PORT/" >/dev/null 2>&1
+service_mode() {
+    if systemd_available && systemctl is-active --quiet opencode-serve.service 2>/dev/null; then
+        printf 'systemd'
+        return
+    fi
+    if pgrep -af 'opencode serve' >/dev/null 2>&1; then
+        printf 'oneshot'
+        return
+    fi
+    printf 'missing'
 }
 
-configure_windows_portproxy() {
-    local wsl_ip
-    wsl_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
-    if [ -z "$wsl_ip" ]; then
-        warn "Cannot determine WSL IP for Windows portproxy."
-        return 1
-    fi
-    if [ ! -x "$NETSH_EXE" ]; then
-        warn "netsh.exe is not available through interop; cannot configure portproxy."
-        return 1
-    fi
-
-    if [ "$DRY_RUN" -eq 1 ]; then
-        log "[dry-run] netsh portproxy 127.0.0.1:$PORT -> $wsl_ip:$PORT"
-        return 0
-    fi
-
-    "$NETSH_EXE" interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport="$PORT" >/dev/null 2>&1 || true
-    if "$NETSH_EXE" interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport="$PORT" connectaddress="$wsl_ip" connectport="$PORT" >/dev/null 2>&1; then
-        log "Windows portproxy configured: 127.0.0.1:$PORT -> $wsl_ip:$PORT"
-        return 0
-    fi
-
-    warn "Cannot configure Windows portproxy. Start Ubuntu as Administrator or add it manually with netsh."
-    return 1
+first_wsl_ip() {
+    hostname -I 2>/dev/null | awk '{print $1}'
 }
 
-ensure_windows_access() {
-    if windows_curl_ok; then
-        log "Windows can reach OpenCode at http://127.0.0.1:$PORT/."
-        return 0
-    fi
-
-    warn "Windows loopback test failed; trying loopback-only portproxy."
-    configure_windows_portproxy || return 0
-
-    if windows_curl_ok; then
-        log "Windows can reach OpenCode through portproxy at http://127.0.0.1:$PORT/."
-    else
-        warn "Windows still cannot reach http://127.0.0.1:$PORT/. Check service logs and Windows networking."
+opencode_version() {
+    if [ -x /usr/local/bin/opencode ]; then
+        /usr/local/bin/opencode --version 2>/dev/null | head -1 || true
+    elif command -v opencode >/dev/null 2>&1; then
+        opencode --version 2>/dev/null | head -1 || true
     fi
 }
 
-write_state() {
-    install_text_file "$STATE_FILE" 0644 root:root <<EOF
+status_json_text() {
+    local wsl_ip listener svc version interop
+    wsl_ip="$(first_wsl_ip)"
+    listener="$(listener_status)"
+    svc="$(service_mode)"
+    version="$(opencode_version)"
+    if interop_available; then interop="true"; else interop="false"; fi
+
+    cat <<EOF
 {
-  "installed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "repo_url": "$(json_escape "$REPO_URL")",
+  "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "mode": "$(json_escape "$MODE")",
   "target_path": "$(json_escape "$TARGET_PATH")",
+  "repo_url": "$(json_escape "$REPO_URL")",
   "port": $PORT,
-  "windows_version": "$(json_escape "$WINDOWS_VERSION")",
-  "windows_build": "$(json_escape "$WINDOWS_BUILD")",
-  "windows_network_mode": "$(json_escape "$WINDOWS_NETWORK_MODE")",
-  "opencode": "/usr/local/bin/opencode",
+  "wsl_ip": "$(json_escape "$wsl_ip")",
+  "service_mode": "$(json_escape "$svc")",
+  "listener": $listener,
+  "opencode_version": "$(json_escape "$version")",
+  "interop_available": $interop,
   "root_only": true
 }
 EOF
 }
 
-main() {
-    require_root
-    choose_target_path
+write_status_json() {
+    local json
+    json="$(status_json_text)"
+    if [ "$MODE" = "status" ]; then
+        printf '%s\n' "$json"
+        return 0
+    fi
+    write_generated_file "$STATUS_JSON" <<EOF
+$json
+EOF
+}
 
-    log "=== OmO root-only Ubuntu WSL bootstrap ==="
-    log "Target path: $TARGET_PATH"
-    log "Repository: $REPO_URL"
-    log "Port: $PORT"
-    log "Mode: $([ "$DRY_RUN" -eq 1 ] && printf dry-run || printf real-run)"
-
-    require_ubuntu_wsl_marker
+run_install() {
     write_wsl_conf
-    require_interop
-    detect_windows
-    ensure_windows_wslconfig
     ensure_apt_packages
-    ensure_repo
+    ensure_repo_install
     ensure_opencode
     ensure_opencode_config
     ensure_opencode_service
     verify_linux_listener || true
-    ensure_windows_access
-    write_state
+    write_status_json
+}
 
-    log "=== OmO bootstrap complete ==="
-    log "OpenCode URL: http://127.0.0.1:$PORT/"
-    log "Log file: $LOG_FILE"
-    log "State file: $STATE_FILE"
-    if [ "$RESTART_REQUIRED" -eq 1 ]; then
-        warn "WSL config changed. If networking/systemd/interoperability behaves oddly, run from Windows: wsl.exe --shutdown"
+run_repair() {
+    write_wsl_conf
+    require_repo_for_repair
+    ensure_opencode
+    ensure_opencode_config
+    ensure_opencode_service
+    verify_linux_listener || true
+    write_status_json
+}
+
+main() {
+    require_root
+    choose_target_path
+    require_ubuntu_wsl
+
+    if [ "$MODE" = "status" ]; then
+        write_status_json
+        exit 0
     fi
+
+    log "=== OmO Ubuntu WSL stage ==="
+    log "Mode: $MODE"
+    log "Target path: $TARGET_PATH"
+    log "Repository: $REPO_URL"
+    log "Port: $PORT"
+    log "Host-managed: $HOST_MANAGED"
+    log "Dry-run: $DRY_RUN"
+
+    case "$MODE" in
+        install) run_install ;;
+        repair) run_repair ;;
+    esac
+
+    log "=== OmO Ubuntu WSL stage complete ==="
+    log "Status JSON: $STATUS_JSON"
+    log "Log file: $LOG_FILE"
 }
 
 main "$@"

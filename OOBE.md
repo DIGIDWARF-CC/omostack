@@ -1,42 +1,60 @@
-# OOBE Setup - Ubuntu WSL to OmO
+# OOBE Setup - Windows Host to Ubuntu WSL to OmO
 
 ## Purpose
 
-OmO OOBE now starts inside a generic Ubuntu WSL distro. The human prepares Ubuntu manually, then downloads and runs one root-only Bash bootstrapper. The script configures Ubuntu, installs OpenCode, and uses WSL interop to adjust the host Windows WSL networking needed for `opencode serve`.
+OmO OOBE is split into two components:
 
-There is no active PowerShell bootstrap path.
+1. Windows host bootstrap: `bootstrap-for-human/omo_host_bootstrap.cmd`.
+2. Ubuntu WSL stage: `bootstrap-for-human/omo_bootstrap.sh`.
+
+The Windows component owns Windows-only work: WSL feature setup, generic Ubuntu install/default selection, Ubuntu Insights registry opt-out, `.wslconfig`, WSL shutdown, and loopback-only `netsh portproxy`. The Ubuntu component is root-only and owns only Ubuntu/OpenCode/systemd work.
+
+No PowerShell bootstrap path is active.
 
 ## Human Entry Point
 
-On Windows, install and start generic Ubuntu under WSL first. The distro must be runnable, must have `/etc/wsl.conf`, and must allow Windows interop. Then run inside Ubuntu:
+Run from an elevated Windows Command Prompt:
 
-```bash
-wget -O /tmp/omo_bootstrap.sh https://raw.githubusercontent.com/DIGIDWARF-CC/omostack/main/bootstrap-for-human/omo_bootstrap.sh
-sudo bash /tmp/omo_bootstrap.sh --target /mnt/s/FastNeuros/omo
+```cmd
+bootstrap-for-human\omo_host_bootstrap.cmd /mode install /target C:\AI\omostack /port 4096
 ```
 
-Useful local options:
+Useful non-mutating commands:
 
-```bash
-sudo bash bootstrap-for-human/omo_bootstrap.sh --help
-sudo bash bootstrap-for-human/omo_bootstrap.sh --dry-run --yes --target /mnt/s/FastNeuros/omo
-sudo bash bootstrap-for-human/omo_bootstrap.sh --target /mnt/c/AI/omostack --port 4096
+```cmd
+bootstrap-for-human\omo_host_bootstrap.cmd /mode status
+bootstrap-for-human\omo_host_bootstrap.cmd /mode install /dry-run
 ```
 
-## What The Bootstrapper Does
+Useful repair command:
+
+```cmd
+bootstrap-for-human\omo_host_bootstrap.cmd /mode repair /target C:\AI\omostack /port 4096
+```
+
+## What The Host Bootstrapper Does
+
+1. Requires administrator rights for real `install` and `repair`; `/dry-run` and `status` do not mutate the host.
+2. Uses only `cmd.exe`, `cscript.exe` JScript, `dism.exe`, `reg.exe`, `wsl.exe`, `netsh.exe`, and `curl.exe`; it does not invoke PowerShell.
+3. Enables WSL optional features and sets WSL2 as the default version.
+4. Installs or reuses generic `Ubuntu`, then sets it as the default WSL distro.
+5. Sets Ubuntu Insights registry default to opt-out.
+6. Backs up and minimally overwrites `%USERPROFILE%\.wslconfig`:
+   - Windows 11 22H2+: `dnsTunneling=true`, `autoProxy=true`, `networkingMode=mirrored`, `firewall=true`.
+   - Windows 10 and older builds: `localhostForwarding=true`.
+7. Runs the Ubuntu stage through `wsl.exe -d Ubuntu -u root -- bash ...`.
+8. Reads Ubuntu machine-readable status JSON, then configures `127.0.0.1:4096` portproxy to the reported WSL IP.
+
+The host bootstrapper does not create a broad inbound firewall rule.
+
+## What The Ubuntu Stage Does
 
 1. Refuses to run outside Ubuntu WSL or when `/etc/wsl.conf` is missing.
-2. Keeps the install root-only: `/etc/wsl.conf` sets `default=root`, OpenCode config/state live under `/root`.
-3. Ensures WSL systemd, `/mnt` automount, and Windows interop are enabled; if interop needs a restart, it asks the human to run `wsl.exe --shutdown`.
-4. Detects the Windows build through `cmd.exe /c ver`.
-5. Updates only OmO-owned Windows `.wslconfig` networking keys through interop:
-   - Windows 11 22H2+ uses mirrored networking keys: `dnsTunneling`, `autoProxy`, `networkingMode=mirrored`, `firewall`.
-   - Older Windows builds use best-effort localhost forwarding only.
-6. Installs Ubuntu base packages, clones `https://github.com/DIGIDWARF-CC/omostack.git` when the target path is empty, and installs OpenCode through the official installer.
-7. Creates `/usr/local/bin/opencode` as a managed symlink and starts `opencode serve` as root through systemd or a one-shot fallback.
-8. Exposes the web UI to Windows at `http://127.0.0.1:4096/`, using loopback-only `netsh interface portproxy` when Windows loopback does not work directly.
-
-The bootstrapper backs up changed WSL config files under `/root/.local/state/omo-bootstrap/backups/` and writes logs/state under `/root/.local/state/omo-bootstrap/`.
+2. Keeps the install root-only: `/etc/wsl.conf` sets `default=root`; OpenCode config/state live under `/root`.
+3. Installs Ubuntu base packages, clones `https://github.com/DIGIDWARF-CC/omostack.git` when needed, and installs OpenCode through the official installer.
+4. Creates `/usr/local/bin/opencode` as a managed symlink.
+5. Starts `opencode serve --hostname 0.0.0.0 --port 4096` through systemd or a one-shot fallback.
+6. Writes `/root/.local/state/omo-bootstrap/host-status.json` with port, WSL IP, listener status, service mode, OpenCode version, and interop availability.
 
 ## Agent Stage-2
 

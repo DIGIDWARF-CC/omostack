@@ -1,0 +1,459 @@
+@if (@X)==(@Y) @end /*
+@echo off
+setlocal EnableExtensions DisableDelayedExpansion
+
+set "MODE=install"
+set "DISTRO=Ubuntu"
+set "TARGET=C:\AI\omostack"
+set "PORT=4096"
+set "REPO=https://github.com/DIGIDWARF-CC/omostack.git"
+set "DRY_RUN=0"
+set "ROOT_DIR=%~dp0"
+set "LOG_ENABLED=0"
+set "LOG_FILE="
+set "BACKUP_DIR="
+set "WIN_VERSION=unknown"
+set "WIN_BUILD=0"
+set "NETWORK_MODE=best-effort"
+set "WSL_SHUTDOWN_NEEDED=0"
+set "STATUS_TMP=%TEMP%\omo-bootstrap-status.json"
+
+call :parse_args %*
+if errorlevel 1 exit /b 2
+
+if /I not "%MODE%"=="install" if /I not "%MODE%"=="repair" if /I not "%MODE%"=="status" (
+    echo Invalid /mode value: %MODE%
+    exit /b 2
+)
+
+if "%DRY_RUN%"=="0" if /I not "%MODE%"=="status" (
+    set "LOG_ENABLED=1"
+    set "LOG_DIR=%LOCALAPPDATA%\OmOHostBootstrap"
+    if not exist "%LOCALAPPDATA%\OmOHostBootstrap" mkdir "%LOCALAPPDATA%\OmOHostBootstrap" >nul 2>nul
+    set "LOG_FILE=%LOCALAPPDATA%\OmOHostBootstrap\bootstrap.log"
+    set "BACKUP_DIR=%LOCALAPPDATA%\OmOHostBootstrap\backups"
+)
+
+call :detect_windows
+if errorlevel 1 exit /b 1
+
+if /I "%MODE%"=="status" (
+    call :status
+    exit /b %ERRORLEVEL%
+)
+
+if "%DRY_RUN%"=="0" (
+    call :require_admin
+    if errorlevel 1 exit /b 1
+) else (
+    call :log "[dry-run] admin check skipped; real install/repair must be started with Run as administrator."
+)
+
+call :ensure_host_prereqs
+if errorlevel 1 exit /b 1
+
+call :ensure_windows_side
+if errorlevel 1 exit /b 1
+
+call :run_ubuntu_stage
+if errorlevel 1 exit /b 1
+
+call :configure_windows_access
+if errorlevel 1 exit /b 1
+
+call :log "OmO host bootstrap complete."
+call :log "OpenCode URL: http://127.0.0.1:%PORT%/"
+exit /b 0
+
+:parse_args
+if "%~1"=="" exit /b 0
+if /I "%~1"=="/mode" (
+    set "MODE=%~2"
+    shift
+    shift
+    goto parse_args
+)
+if /I "%~1"=="/distro" (
+    set "DISTRO=%~2"
+    shift
+    shift
+    goto parse_args
+)
+if /I "%~1"=="/target" (
+    set "TARGET=%~2"
+    shift
+    shift
+    goto parse_args
+)
+if /I "%~1"=="/port" (
+    set "PORT=%~2"
+    shift
+    shift
+    goto parse_args
+)
+if /I "%~1"=="/repo" (
+    set "REPO=%~2"
+    shift
+    shift
+    goto parse_args
+)
+if /I "%~1"=="/dry-run" (
+    set "DRY_RUN=1"
+    shift
+    goto parse_args
+)
+if /I "%~1"=="/help" goto usage
+if /I "%~1"=="-h" goto usage
+echo Unknown argument: %~1
+goto usage_error
+
+:usage
+echo Usage: omo_host_bootstrap.cmd [/mode install^|repair^|status] [/distro Ubuntu] [/target C:\AI\omostack] [/port 4096] [/repo URL] [/dry-run]
+echo.
+echo Windows host bootstrap. No PowerShell is used. install/repair require Run as administrator unless /dry-run is used.
+exit /b 0
+
+:usage_error
+call :usage
+exit /b 2
+
+:log
+echo %DATE% %TIME% %*
+if "%LOG_ENABLED%"=="1" >>"%LOG_FILE%" echo %DATE% %TIME% %*
+exit /b 0
+
+:require_admin
+net session >nul 2>nul
+if errorlevel 1 (
+    echo ERROR: install/repair must be started from an elevated command prompt.
+    echo Right-click omo_host_bootstrap.cmd and choose "Run as administrator".
+    exit /b 1
+)
+call :log "Administrator token detected."
+exit /b 0
+
+:detect_windows
+for /f "tokens=1,2 delims=|" %%A in ('cscript.exe //nologo //E:JScript "%~f0" windows-version') do (
+    set "WIN_VERSION=%%A"
+    set "WIN_BUILD=%%B"
+)
+if "%WIN_BUILD%"=="" set "WIN_BUILD=0"
+if %WIN_BUILD% GEQ 22621 (
+    set "NETWORK_MODE=mirrored"
+) else (
+    set "NETWORK_MODE=best-effort"
+)
+call :log "Windows version: %WIN_VERSION% (build %WIN_BUILD%); WSL networking mode: %NETWORK_MODE%"
+exit /b 0
+
+:ensure_host_prereqs
+for %%T in (cscript.exe dism.exe reg.exe wsl.exe netsh.exe curl.exe) do (
+    where %%T >nul 2>nul
+    if errorlevel 1 (
+        echo ERROR: %%T is required but was not found in PATH.
+        exit /b 1
+    )
+)
+exit /b 0
+
+:ensure_windows_side
+call :log "Ensuring WSL optional features."
+if "%DRY_RUN%"=="1" (
+    call :log "[dry-run] dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart"
+    call :log "[dry-run] dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart"
+) else (
+    dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart >>"%LOG_FILE%" 2>&1
+    if errorlevel 1 exit /b 1
+    dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart >>"%LOG_FILE%" 2>&1
+    if errorlevel 1 exit /b 1
+)
+
+call :log "Setting WSL default version and Ubuntu Insights opt-out."
+if "%DRY_RUN%"=="1" (
+    call :log "[dry-run] wsl.exe --set-default-version 2"
+    call :log "[dry-run] reg.exe add HKCU\Software\Canonical\Ubuntu /v UbuntuInsightsConsent /t REG_DWORD /d 0 /f"
+) else (
+    wsl.exe --set-default-version 2 >>"%LOG_FILE%" 2>&1
+    reg.exe add HKCU\Software\Canonical\Ubuntu /v UbuntuInsightsConsent /t REG_DWORD /d 0 /f >>"%LOG_FILE%" 2>&1
+)
+
+call :log "Writing minimal %USERPROFILE%\.wslconfig for %NETWORK_MODE%."
+for /f "usebackq delims=" %%R in (`cscript.exe //nologo //E:JScript "%~f0" wslconfig "%USERPROFILE%\.wslconfig" "%NETWORK_MODE%" "%BACKUP_DIR%" "%DRY_RUN%"`) do (
+    set "WSLCONFIG_RESULT=%%R"
+)
+call :log ".wslconfig: %WSLCONFIG_RESULT%"
+if /I "%WSLCONFIG_RESULT%"=="updated" set "WSL_SHUTDOWN_NEEDED=1"
+
+cscript.exe //nologo //E:JScript "%~f0" distro-exists "%DISTRO%" >nul
+if errorlevel 1 (
+    call :log "WSL distro %DISTRO% is missing."
+    if "%DRY_RUN%"=="1" (
+        call :log "[dry-run] wsl.exe --install -d %DISTRO% --no-launch"
+    ) else (
+        wsl.exe --install -d "%DISTRO%" --no-launch >>"%LOG_FILE%" 2>&1
+        if errorlevel 1 exit /b 1
+    )
+) else (
+    call :log "WSL distro %DISTRO% already exists."
+)
+
+if "%DRY_RUN%"=="1" goto dry_run_set_default
+wsl.exe --set-default %DISTRO% >>"%LOG_FILE%" 2>&1
+if errorlevel 1 exit /b 1
+goto after_set_default
+
+:dry_run_set_default
+call :log "[dry-run] wsl.exe --set-default %DISTRO%"
+
+:after_set_default
+if not "%WSL_SHUTDOWN_NEEDED%"=="1" goto after_shutdown
+if "%DRY_RUN%"=="1" goto dry_run_shutdown
+call :log ".wslconfig changed; shutting down WSL to apply host settings."
+wsl.exe --shutdown >>"%LOG_FILE%" 2>&1
+goto after_shutdown
+
+:dry_run_shutdown
+call :log "[dry-run] wsl.exe --shutdown"
+
+:after_shutdown
+exit /b 0
+
+:run_ubuntu_stage
+set "STAGE_WIN=%ROOT_DIR%omo_bootstrap.sh"
+if not exist "%STAGE_WIN%" (
+    set "STAGE_WIN=%TEMP%\omo_bootstrap.sh"
+    if "%DRY_RUN%"=="1" (
+        call :log "[dry-run] curl.exe -fsSL -o %STAGE_WIN% https://raw.githubusercontent.com/DIGIDWARF-CC/omostack/main/bootstrap-for-human/omo_bootstrap.sh"
+    ) else (
+        curl.exe -fsSL -o "%STAGE_WIN%" "https://raw.githubusercontent.com/DIGIDWARF-CC/omostack/main/bootstrap-for-human/omo_bootstrap.sh"
+        if errorlevel 1 exit /b 1
+    )
+)
+
+for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-to-wsl "%STAGE_WIN%"`) do set "STAGE_WSL=%%P"
+for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-to-wsl "%TARGET%"`) do set "TARGET_WSL=%%P"
+
+if "%DRY_RUN%"=="1" (
+    call :log "[dry-run] wsl.exe -d %DISTRO% -u root -- bash %STAGE_WSL% --mode %MODE% --target %TARGET_WSL% --repo %REPO% --port %PORT% --yes --host-managed --dry-run"
+    cscript.exe //nologo //E:JScript "%~f0" distro-exists "%DISTRO%" >nul
+    if errorlevel 1 exit /b 0
+    wsl.exe -d %DISTRO% -u root -- bash "%STAGE_WSL%" --mode "%MODE%" --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%" --yes --host-managed --dry-run
+    if errorlevel 1 exit /b 1
+    exit /b 0
+)
+
+call :log "Running Ubuntu stage through WSL."
+wsl.exe -d %DISTRO% -u root -- bash "%STAGE_WSL%" --mode "%MODE%" --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%" --yes --host-managed
+exit /b %ERRORLEVEL%
+
+:configure_windows_access
+if "%DRY_RUN%"=="1" (
+    call :log "[dry-run] would read Ubuntu status JSON and configure loopback portproxy."
+    exit /b 0
+)
+
+wsl.exe -d %DISTRO% -u root -- cat /root/.local/state/omo-bootstrap/host-status.json > "%STATUS_TMP%" 2>>"%LOG_FILE%"
+if errorlevel 1 (
+    echo ERROR: Ubuntu stage status JSON was not available.
+    exit /b 1
+)
+
+for /f "usebackq delims=" %%I in (`cscript.exe //nologo //E:JScript "%~f0" json-field "%STATUS_TMP%" wsl_ip`) do set "WSL_IP=%%I"
+if "%WSL_IP%"=="" (
+    for /f "tokens=1" %%I in ('wsl.exe -d %DISTRO% -u root -- hostname -I') do set "WSL_IP=%%I"
+)
+if "%WSL_IP%"=="" (
+    echo ERROR: cannot determine WSL IP for portproxy.
+    exit /b 1
+)
+
+call :log "Configuring loopback-only portproxy 127.0.0.1:%PORT% -> %WSL_IP%:%PORT%."
+netsh.exe interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=%PORT% >>"%LOG_FILE%" 2>&1
+netsh.exe interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=%PORT% connectaddress=%WSL_IP% connectport=%PORT% >>"%LOG_FILE%" 2>&1
+if errorlevel 1 exit /b 1
+
+curl.exe -fsS --max-time 8 "http://127.0.0.1:%PORT%/" >nul 2>>"%LOG_FILE%"
+if errorlevel 1 (
+    call :log "WARN: Windows curl did not reach http://127.0.0.1:%PORT%/ yet."
+) else (
+    call :log "Windows curl reached http://127.0.0.1:%PORT%/."
+)
+exit /b 0
+
+:status
+call :log "Mode: status"
+call :log "Admin: checking"
+net session >nul 2>nul
+if errorlevel 1 (call :log "Admin: no") else (call :log "Admin: yes")
+call :log "Distro: %DISTRO%"
+call :log "Target: %TARGET%"
+call :log "Port: %PORT%"
+call :log "Repo: %REPO%"
+call :log "Windows version: %WIN_VERSION% (build %WIN_BUILD%); WSL networking mode: %NETWORK_MODE%"
+echo.
+echo === .wslconfig ===
+if exist "%USERPROFILE%\.wslconfig" (type "%USERPROFILE%\.wslconfig") else (echo ^<missing^>)
+echo.
+echo === wsl --status ===
+wsl.exe --status
+echo.
+echo === wsl -l -v ===
+wsl.exe -l -v
+echo.
+echo === portproxy ===
+netsh.exe interface portproxy show all
+
+set "STAGE_WIN=%ROOT_DIR%omo_bootstrap.sh"
+if exist "%STAGE_WIN%" (
+    cscript.exe //nologo //E:JScript "%~f0" distro-exists "%DISTRO%" >nul
+    if not errorlevel 1 (
+        call :status_ubuntu_stage
+    )
+)
+exit /b 0
+
+:status_ubuntu_stage
+for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-to-wsl "%STAGE_WIN%"`) do set "STAGE_WSL=%%P"
+for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-to-wsl "%TARGET%"`) do set "TARGET_WSL=%%P"
+echo.
+echo === Ubuntu stage status ===
+wsl.exe -d %DISTRO% -u root -- bash "%STAGE_WSL%" --mode status --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%"
+exit /b %ERRORLEVEL%
+
+*/
+
+var fso = new ActiveXObject("Scripting.FileSystemObject");
+var shell = new ActiveXObject("WScript.Shell");
+var args = WScript.Arguments;
+
+function trim(s) {
+    return String(s).replace(/^\s+|\s+$/g, "");
+}
+
+function runText(cmd) {
+    var exec = shell.Exec('%ComSpec% /d /c ' + cmd);
+    var out = exec.StdOut.ReadAll();
+    var err = exec.StdErr.ReadAll();
+    while (exec.Status === 0) {
+        WScript.Sleep(20);
+    }
+    return out + err;
+}
+
+function ensureDir(path) {
+    if (!path || fso.FolderExists(path)) return;
+    var parent = fso.GetParentFolderName(path);
+    if (parent && !fso.FolderExists(parent)) ensureDir(parent);
+    fso.CreateFolder(path);
+}
+
+function readFile(path) {
+    if (!fso.FileExists(path)) return "";
+    var file = fso.OpenTextFile(path, 1, false);
+    var text = file.ReadAll();
+    file.Close();
+    return text;
+}
+
+function writeFile(path, text) {
+    var parent = fso.GetParentFolderName(path);
+    if (parent) ensureDir(parent);
+    var file = fso.OpenTextFile(path, 2, true, false);
+    file.Write(text);
+    file.Close();
+}
+
+function backupFile(path, backupDir) {
+    if (!backupDir || !fso.FileExists(path)) return;
+    ensureDir(backupDir);
+    var stamp = new Date().getTime();
+    fso.CopyFile(path, fso.BuildPath(backupDir, ".wslconfig." + stamp + ".bak"), true);
+}
+
+function winToWsl(path) {
+    path = String(path).replace(/\r|\n/g, "");
+    if (/^\/mnt\//i.test(path) || /^\//.test(path)) return path;
+    var match = /^([A-Za-z]):[\\\/]?(.*)$/.exec(path);
+    if (!match) return path;
+    return "/mnt/" + match[1].toLowerCase() + "/" + match[2].replace(/\\/g, "/");
+}
+
+function windowsVersion() {
+    var text = runText("ver");
+    var match = /([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)/.exec(text);
+    var version = match ? match[1] : "unknown";
+    var parts = version.split(".");
+    var build = parts.length >= 3 ? parts[2] : "0";
+    WScript.Echo(version + "|" + build);
+}
+
+function distroExists(name) {
+    var text = runText("wsl.exe -l -q");
+    text = text.replace(/\u0000/g, "").replace(/\r/g, "\n");
+    var wanted = String(name).toLowerCase();
+    var lines = text.split(/\n+/);
+    for (var i = 0; i < lines.length; i++) {
+        var line = trim(lines[i]).replace(/^\*/, "");
+        if (line.toLowerCase() === wanted) WScript.Quit(0);
+    }
+    WScript.Quit(1);
+}
+
+function desiredWslConfig(mode) {
+    if (String(mode).toLowerCase() === "mirrored") {
+        return "[wsl2]\r\n"
+            + "dnsTunneling=true\r\n"
+            + "autoProxy=true\r\n"
+            + "networkingMode=mirrored\r\n"
+            + "firewall=true\r\n";
+    }
+    return "[wsl2]\r\nlocalhostForwarding=true\r\n";
+}
+
+function normalizeNewlines(text) {
+    return String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n").replace(/\s+$/g, "");
+}
+
+function wslconfig(path, mode, backupDir, dryRun) {
+    var desired = desiredWslConfig(mode);
+    var current = readFile(path);
+    if (normalizeNewlines(current) === normalizeNewlines(desired)) {
+        WScript.Echo("unchanged");
+        return;
+    }
+    if (String(dryRun) === "1") {
+        WScript.Echo("would-update");
+        return;
+    }
+    backupFile(path, backupDir);
+    writeFile(path, desired);
+    WScript.Echo("updated");
+}
+
+function jsonField(path, field) {
+    var text = readFile(path);
+    if (!text) WScript.Quit(1);
+    var obj = eval("(" + text + ")");
+    if (obj && obj.hasOwnProperty(field)) {
+        WScript.Echo(String(obj[field]));
+        WScript.Quit(0);
+    }
+    WScript.Quit(1);
+}
+
+if (args.length < 1) WScript.Quit(2);
+var command = String(args.Item(0)).toLowerCase();
+if (command === "windows-version") {
+    windowsVersion();
+} else if (command === "win-to-wsl") {
+    WScript.Echo(winToWsl(args.Item(1)));
+} else if (command === "distro-exists") {
+    distroExists(args.Item(1));
+} else if (command === "wslconfig") {
+    wslconfig(args.Item(1), args.Item(2), args.Item(3), args.Item(4));
+} else if (command === "json-field") {
+    jsonField(args.Item(1), args.Item(2));
+} else {
+    WScript.Echo("Unknown helper command: " + command);
+    WScript.Quit(2);
+}

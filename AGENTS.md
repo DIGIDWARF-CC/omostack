@@ -24,21 +24,20 @@ Adjust these values only when cloning this omostack home to another machine.
 
 For a fresh clone of this repository:
 
-1. A human installs and starts generic Ubuntu under WSL, then runs the root-only shell bootstrap inside Ubuntu:
+1. A human starts the Windows host bootstrap from an elevated Command Prompt:
 
-```bash
-wget -O /tmp/omo_bootstrap.sh https://raw.githubusercontent.com/DIGIDWARF-CC/omostack/main/bootstrap-for-human/omo_bootstrap.sh
-sudo bash /tmp/omo_bootstrap.sh --target /mnt/s/FastNeuros/omo
+```cmd
+bootstrap-for-human\omo_host_bootstrap.cmd /mode install /target C:\AI\omostack /port 4096
 ```
 
-2. After the human bootstrap has prepared Ubuntu/OpenCode and Windows loopback access through WSL interop, an agent continues inside WSL:
+2. After the host bootstrap has prepared Windows WSL settings, Ubuntu/OpenCode, and Windows loopback access, an agent continues inside WSL:
 
 ```bash
 chmod +x .agent-docs/scripts/OOBE-setup.sh
 .agent-docs/scripts/OOBE-setup.sh --auto
 ```
 
-The shell bootstrapper is the human-facing installer. `OOBE-setup.sh` is stage-2 agent maintenance inside WSL/Linux. See `OOBE.md` for details.
+The Windows host bootstrapper is the human-facing installer. `OOBE-setup.sh` is stage-2 agent maintenance inside WSL/Linux. See `OOBE.md` for details.
 
 ---
 
@@ -87,7 +86,8 @@ See `.agent-docs/README.md` for the complete navigation map.
 | `.agent-docs/self-bootstrap-checklist.md` | First file a future agent should open |
 | `.agent-docs/setup-directives.md` | Primary operations runbook (WSL/Linux) |
 | `.agent-docs/scripts/` | Bash scripts for maintenance, verification, and repair |
-| `bootstrap-for-human/omo_bootstrap.sh` | Root-only Ubuntu WSL bootstrapper for humans |
+| `bootstrap-for-human/omo_host_bootstrap.cmd` | Windows host bootstrapper for humans |
+| `bootstrap-for-human/omo_bootstrap.sh` | Root-only Ubuntu WSL stage called by the host bootstrapper |
 | `.agent-docs/recipes/troubleshoot.sh` | Interactive troubleshooting menu |
 | `.agent-docs/templates/` | Sanitized OpenCode / oh-my-openagent examples |
 | `.my-omo/remote-access/` | Canonical ignored folder for real remote-access keys and local pseudoconfigs |
