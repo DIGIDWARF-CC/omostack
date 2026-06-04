@@ -1,40 +1,46 @@
-# OOBE Setup - Windows to WSL to OmO
+# OOBE Setup - Ubuntu WSL to OmO
 
 ## Purpose
 
-OmO OOBE starts on Windows. A human runs one PowerShell 5.1-compatible bootstrapper, confirms UAC when Windows needs it, and the script prepares WSL/Ubuntu/OpenCode enough for an agent to finish stage-2 setup inside WSL.
+OmO OOBE now starts inside a generic Ubuntu WSL distro. The human prepares Ubuntu manually, then downloads and runs one root-only Bash bootstrapper. The script configures Ubuntu, installs OpenCode, and uses WSL interop to adjust the host Windows WSL networking needed for `opencode serve`.
+
+There is no active PowerShell bootstrap path.
 
 ## Human Entry Point
 
-Run from Windows PowerShell:
+On Windows, install and start generic Ubuntu under WSL first. The distro must be runnable, must have `/etc/wsl.conf`, and must allow Windows interop. Then run inside Ubuntu:
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-for-human\omo_bootstrap.ps1
+```bash
+wget -O /tmp/omo_bootstrap.sh https://raw.githubusercontent.com/DIGIDWARF-CC/omostack/main/bootstrap-for-human/omo_bootstrap.sh
+sudo bash /tmp/omo_bootstrap.sh --target /mnt/s/FastNeuros/omo
 ```
 
-Useful non-mutating modes:
+Useful local options:
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-for-human\omo_bootstrap.ps1 -Mode Status
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-for-human\omo_bootstrap.ps1 -Mode Plan -TargetPath S:\FastNeuros\omo
+```bash
+sudo bash bootstrap-for-human/omo_bootstrap.sh --help
+sudo bash bootstrap-for-human/omo_bootstrap.sh --dry-run --yes --target /mnt/s/FastNeuros/omo
+sudo bash bootstrap-for-human/omo_bootstrap.sh --target /mnt/c/AI/omostack --port 4096
 ```
 
 ## What The Bootstrapper Does
 
-1. Asks where to install OmO and clones `https://github.com/DIGIDWARF-CC/omostack.git`.
-2. Checks Windows PowerShell, Windows build, Git, WSL availability, and Ubuntu capabilities.
-3. Enables WSL features and installs generic `Ubuntu` when needed.
-4. Makes the resolved Ubuntu distro the default WSL distro.
-5. Updates Windows `.wslconfig` and WSL `/etc/wsl.conf` for systemd, interop, `/mnt` automount, and best available VPN-aware networking.
-6. Installs WSL base packages and OpenCode silently.
-7. Starts `opencode serve` in WSL as the created Unix user with the OmO repository as the working project.
-8. Exposes the web UI to Windows at `http://127.0.0.1:4096/` through local loopback portproxy.
+1. Refuses to run outside Ubuntu WSL or when `/etc/wsl.conf` is missing.
+2. Keeps the install root-only: `/etc/wsl.conf` sets `default=root`, OpenCode config/state live under `/root`.
+3. Ensures WSL systemd, `/mnt` automount, and Windows interop are enabled; if interop needs a restart, it asks the human to run `wsl.exe --shutdown`.
+4. Detects the Windows build through `cmd.exe /c ver`.
+5. Updates only OmO-owned Windows `.wslconfig` networking keys through interop:
+   - Windows 11 22H2+ uses mirrored networking keys: `dnsTunneling`, `autoProxy`, `networkingMode=mirrored`, `firewall`.
+   - Older Windows builds use best-effort localhost forwarding only.
+6. Installs Ubuntu base packages, clones `https://github.com/DIGIDWARF-CC/omostack.git` when the target path is empty, and installs OpenCode through the official installer.
+7. Creates `/usr/local/bin/opencode` as a managed symlink and starts `opencode serve` as root through systemd or a one-shot fallback.
+8. Exposes the web UI to Windows at `http://127.0.0.1:4096/`, using loopback-only `netsh interface portproxy` when Windows loopback does not work directly.
 
-Windows 11 22H2+ can use WSL mirrored networking, DNS tunneling, and auto proxy. Windows 10 is treated as best-effort: the bootstrapper keeps localhost forwarding only and uses portproxy for Windows access to the WSL OpenCode web UI.
+The bootstrapper backs up changed WSL config files under `/root/.local/state/omo-bootstrap/backups/` and writes logs/state under `/root/.local/state/omo-bootstrap/`.
 
 ## Agent Stage-2
 
-After Windows bootstrap succeeds, an agent inside WSL can run:
+After the human bootstrap succeeds, an agent inside WSL can run:
 
 ```bash
 cd /mnt/s/FastNeuros/omo

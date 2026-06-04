@@ -11,15 +11,16 @@ Use this file first when an agent opens this omostack home.
 - OpenCode runtime state is ignored under `.omo/`.
 - **Target environment: WSL/Linux (Bash scripts, XDG paths).**
 
-## 2. New Install? Confirm Windows Bootstrap First
+## 2. New Install? Confirm Human Bootstrap First
 
-If this is a fresh clone of the repository, the human-facing first step is Windows PowerShell:
+If this is a fresh clone of the repository, the human-facing first step is generic Ubuntu WSL plus the root-only shell bootstrap:
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-for-human\omo_bootstrap.ps1
+```bash
+wget -O /tmp/omo_bootstrap.sh https://raw.githubusercontent.com/DIGIDWARF-CC/omostack/main/bootstrap-for-human/omo_bootstrap.sh
+sudo bash /tmp/omo_bootstrap.sh --target /mnt/s/FastNeuros/omo
 ```
 
-Inside WSL, agents only run stage-2:
+After that, agents run stage-2:
 
 ```bash
 .agent-docs/scripts/OOBE-setup.sh --auto

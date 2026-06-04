@@ -1,6 +1,6 @@
 # Setup Directives - Omostack Operations Runbook (WSL/Linux)
 
-This is the primary runbook for maintaining the OpenCode / oh-my-openagent omostack home on **WSL/Linux**. Human bootstrap starts on Windows with `bootstrap-for-human/omo_bootstrap.ps1`; this runbook covers stage-2 agent operations inside WSL/Linux.
+This is the primary runbook for maintaining the OpenCode / oh-my-openagent omostack home on **WSL/Linux**. Human bootstrap starts inside generic Ubuntu WSL with `bootstrap-for-human/omo_bootstrap.sh`; this runbook covers stage-2 agent operations inside WSL/Linux.
 
 ## 1. Status Detection
 
@@ -18,8 +18,9 @@ Tool health classification:
 
 For a fresh machine, confirm the human bootstrap has already run or point the user to:
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-for-human\omo_bootstrap.ps1
+```bash
+wget -O /tmp/omo_bootstrap.sh https://raw.githubusercontent.com/DIGIDWARF-CC/omostack/main/bootstrap-for-human/omo_bootstrap.sh
+sudo bash /tmp/omo_bootstrap.sh --target /mnt/s/FastNeuros/omo
 ```
 
 Then inside WSL:

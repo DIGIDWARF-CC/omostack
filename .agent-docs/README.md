@@ -1,6 +1,6 @@
 # .agent-docs - Omostack Home Documentation
 
-This directory is the public, tracked knowledge base for the omostack home — an operations base for OpenCode and oh-my-openagent on **WSL/Linux**. Human OOBE starts from Windows PowerShell in `bootstrap-for-human/omo_bootstrap.ps1`; this folder contains the agent-facing stage-2 docs and scripts.
+This directory is the public, tracked knowledge base for the omostack home — an operations base for OpenCode and oh-my-openagent on **WSL/Linux**. Human OOBE starts from generic Ubuntu WSL with `bootstrap-for-human/omo_bootstrap.sh`; this folder contains the agent-facing stage-2 docs and scripts.
 
 This is not application documentation. It is an operations base for agent-driven maintenance of the local agent environment.
 
@@ -8,7 +8,7 @@ This is not application documentation. It is an operations base for agent-driven
 
 | Need | Open |
 |------|------|
-| **New install / OOBE** | `../OOBE.md` and `../bootstrap-for-human/omo_bootstrap.ps1` |
+| **New install / OOBE** | `../OOBE.md` and `../bootstrap-for-human/omo_bootstrap.sh` |
 | New agent orientation | `self-bootstrap-checklist.md` |
 | Main maintenance runbook | `setup-directives.md` |
 | Remote-access policy | `agent-remote-access.md` |
@@ -52,7 +52,7 @@ Gitignore policy:
 | `scripts/` | Bash scripts with dry-run behavior for risky operations |
 | `recipes/` | Interactive troubleshooting menus and multi-step fix workflows |
 
-Windows PowerShell scripts outside `bootstrap-for-human/omo_bootstrap.ps1` are not part of the active OOBE path.
+PowerShell scripts are not part of the active OOBE path.
 
 ## Operating Rules
 

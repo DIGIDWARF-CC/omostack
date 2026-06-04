@@ -24,20 +24,21 @@ Adjust these values only when cloning this omostack home to another machine.
 
 For a fresh clone of this repository:
 
-1. A human starts from Windows PowerShell:
+1. A human installs and starts generic Ubuntu under WSL, then runs the root-only shell bootstrap inside Ubuntu:
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\bootstrap-for-human\omo_bootstrap.ps1
+```bash
+wget -O /tmp/omo_bootstrap.sh https://raw.githubusercontent.com/DIGIDWARF-CC/omostack/main/bootstrap-for-human/omo_bootstrap.sh
+sudo bash /tmp/omo_bootstrap.sh --target /mnt/s/FastNeuros/omo
 ```
 
-2. After Windows bootstrap has prepared WSL/Ubuntu/OpenCode, an agent continues inside WSL:
+2. After the human bootstrap has prepared Ubuntu/OpenCode and Windows loopback access through WSL interop, an agent continues inside WSL:
 
 ```bash
 chmod +x .agent-docs/scripts/OOBE-setup.sh
 .agent-docs/scripts/OOBE-setup.sh --auto
 ```
 
-The PowerShell bootstrapper is the only human-facing installer. `OOBE-setup.sh` is stage-2 agent maintenance inside WSL/Linux. See `OOBE.md` for details.
+The shell bootstrapper is the human-facing installer. `OOBE-setup.sh` is stage-2 agent maintenance inside WSL/Linux. See `OOBE.md` for details.
 
 ---
 
@@ -86,7 +87,7 @@ See `.agent-docs/README.md` for the complete navigation map.
 | `.agent-docs/self-bootstrap-checklist.md` | First file a future agent should open |
 | `.agent-docs/setup-directives.md` | Primary operations runbook (WSL/Linux) |
 | `.agent-docs/scripts/` | Bash scripts for maintenance, verification, and repair |
-| `bootstrap-for-human/omo_bootstrap.ps1` | Windows PowerShell bootstrapper for humans |
+| `bootstrap-for-human/omo_bootstrap.sh` | Root-only Ubuntu WSL bootstrapper for humans |
 | `.agent-docs/recipes/troubleshoot.sh` | Interactive troubleshooting menu |
 | `.agent-docs/templates/` | Sanitized OpenCode / oh-my-openagent examples |
 | `.my-omo/remote-access/` | Canonical ignored folder for real remote-access keys and local pseudoconfigs |

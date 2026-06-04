@@ -40,17 +40,20 @@ run_templates() {
              ".agent-docs/templates/install-state.example.json"; do
         assert_file "$f"
     done
-    local combined
-    combined=$(cat "${repo_root}/.agent-docs/templates/"*.jsonc 2>/dev/null || true)
     assert_not_contains ".agent-docs/templates/oh-my-openagent.example.jsonc" "ghp_"
 }
 
 run_script_safety() {
-    assert_file "bootstrap-for-human/omo_bootstrap.ps1"
+    assert_file "bootstrap-for-human/omo_bootstrap.sh"
     for f in check-health.sh check-config.sh backup-omostack.sh cleanup-temp.sh \
              repair-cache.sh check-scaffold.sh OOBE-setup.sh diagnostic.sh; do
         assert_file ".agent-docs/scripts/$f"
     done
+    if bash -n "${repo_root}/bootstrap-for-human/omo_bootstrap.sh"; then
+        echo "PASS omo_bootstrap.sh parses as Bash"
+    else
+        failures+=("omo_bootstrap.sh failed Bash parse check")
+    fi
     assert_contains ".agent-docs/scripts/repair-cache.sh" "ConfirmRepair"
     if find "${repo_root}/.agent-docs/scripts" -maxdepth 1 -name '*.ps1' | grep -q .; then
         failures+=("legacy .ps1 scripts found under .agent-docs/scripts")
@@ -96,10 +99,6 @@ run_troubleshooting() {
              ".agent-docs/model-and-config-reference.md"; do
         assert_file "$f"
     done
-    local combined
-    combined=$(cat "${repo_root}/.agent-docs/troubleshooting.md" \
-                  "${repo_root}/.agent-docs/provider-auth.md" \
-                  "${repo_root}/.agent-docs/model-and-config-reference.md" 2>/dev/null || true)
     for token in "ProviderInitError" "ProviderModelNotFoundError" "oh-my-openagent" \
                  "missing" "unhealthy" "doctor"; do
         assert_contains ".agent-docs/troubleshooting.md" "$token"
@@ -123,9 +122,6 @@ run_gitignore() {
 
 run_links() {
     assert_file ".agent-docs/self-bootstrap-checklist.md"
-    local combined
-    combined=$(cat "${repo_root}/.agent-docs/README.md" \
-                  "${repo_root}/.agent-docs/self-bootstrap-checklist.md" 2>/dev/null || true)
     for token in "setup-directives.md" "agent-remote-access.md" "troubleshooting.md" \
                  "provider-auth.md" "model-and-config-reference.md" "self-bootstrap-checklist.md" \
                  "scripts/" "templates/"; do

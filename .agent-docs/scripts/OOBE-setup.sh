@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stage-2 OOBE setup for agents running inside WSL/Linux.
-# Human bootstrap starts from bootstrap-for-human/omo_bootstrap.ps1.
+# Human bootstrap starts from bootstrap-for-human/omo_bootstrap.sh.
 set -euo pipefail
 
 AUTO=false
