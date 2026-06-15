@@ -47,6 +47,11 @@ bootstrap-for-human\omo_host_bootstrap.cmd /mode repair /target C:\AI\omostack /
 
 The host bootstrapper does not create a broad inbound firewall rule.
 
+On fresh Windows 10 hosts, enabling WSL optional features can require a reboot before
+the `Ubuntu` distro becomes available. In that case the host bootstrapper stops
+after the install attempt with a rerun/reboot instruction instead of continuing
+into the Ubuntu stage or creating a bogus portproxy.
+
 ## What The Ubuntu Stage Does
 
 1. Refuses to run outside Ubuntu WSL or when `/etc/wsl.conf` is missing.

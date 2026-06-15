@@ -197,8 +197,13 @@ if errorlevel 1 (
     call :log "WSL distro %DISTRO% already exists."
 )
 
+if not "%DRY_RUN%"=="1" (
+    call :verify_distro_available "after WSL install attempt"
+    if errorlevel 1 exit /b 1
+)
+
 if "%DRY_RUN%"=="1" goto dry_run_set_default
-wsl.exe --set-default %DISTRO% >>"%LOG_FILE%" 2>&1
+wsl.exe --set-default "%DISTRO%" >>"%LOG_FILE%" 2>&1
 if errorlevel 1 exit /b 1
 goto after_set_default
 
@@ -218,6 +223,17 @@ call :log "[dry-run] wsl.exe --shutdown"
 :after_shutdown
 exit /b 0
 
+:verify_distro_available
+cscript.exe //nologo //E:JScript "%~f0" distro-exists "%DISTRO%" >nul
+if errorlevel 1 (
+    echo ERROR: WSL distro %DISTRO% is not available %~1.
+    echo Windows may need a reboot after enabling WSL features, or the distro install may still be pending.
+    echo Rerun this script after reboot. If it still fails, install Ubuntu manually with:
+    echo   wsl.exe --install -d %DISTRO%
+    exit /b 1
+)
+exit /b 0
+
 :run_ubuntu_stage
 set "STAGE_WIN=%ROOT_DIR%omo_bootstrap.sh"
 if not exist "%STAGE_WIN%" (
@@ -234,16 +250,19 @@ for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-t
 for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-to-wsl "%TARGET%"`) do set "TARGET_WSL=%%P"
 
 if "%DRY_RUN%"=="1" (
-    call :log "[dry-run] wsl.exe -d %DISTRO% -u root -- bash %STAGE_WSL% --mode %MODE% --target %TARGET_WSL% --repo %REPO% --port %PORT% --yes --host-managed --dry-run"
+    call :log "[dry-run] wsl.exe -d ""%DISTRO%"" -u root -- bash %STAGE_WSL% --mode %MODE% --target %TARGET_WSL% --repo %REPO% --port %PORT% --yes --host-managed --dry-run"
     cscript.exe //nologo //E:JScript "%~f0" distro-exists "%DISTRO%" >nul
     if errorlevel 1 exit /b 0
-    wsl.exe -d %DISTRO% -u root -- bash "%STAGE_WSL%" --mode "%MODE%" --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%" --yes --host-managed --dry-run
+    wsl.exe -d "%DISTRO%" -u root -- bash "%STAGE_WSL%" --mode "%MODE%" --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%" --yes --host-managed --dry-run
     if errorlevel 1 exit /b 1
     exit /b 0
 )
 
+call :verify_distro_available "before Ubuntu stage"
+if errorlevel 1 exit /b 1
+
 call :log "Running Ubuntu stage through WSL."
-wsl.exe -d %DISTRO% -u root -- bash "%STAGE_WSL%" --mode "%MODE%" --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%" --yes --host-managed
+wsl.exe -d "%DISTRO%" -u root -- bash "%STAGE_WSL%" --mode "%MODE%" --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%" --yes --host-managed
 exit /b %ERRORLEVEL%
 
 :configure_windows_access
@@ -252,15 +271,24 @@ if "%DRY_RUN%"=="1" (
     exit /b 0
 )
 
-wsl.exe -d %DISTRO% -u root -- cat /root/.local/state/omo-bootstrap/host-status.json > "%STATUS_TMP%" 2>>"%LOG_FILE%"
+wsl.exe -d "%DISTRO%" -u root -- cat /root/.local/state/omo-bootstrap/host-status.json > "%STATUS_TMP%" 2>>"%LOG_FILE%"
 if errorlevel 1 (
     echo ERROR: Ubuntu stage status JSON was not available.
     exit /b 1
 )
 
-for /f "usebackq delims=" %%I in (`cscript.exe //nologo //E:JScript "%~f0" json-field "%STATUS_TMP%" wsl_ip`) do set "WSL_IP=%%I"
+set "WSL_IP="
+for /f "usebackq delims=" %%I in (`cscript.exe //nologo //E:JScript "%~f0" json-field "%STATUS_TMP%" wsl_ip 2^>nul`) do set "WSL_IP=%%I"
+if not "%WSL_IP%"=="" (
+    cscript.exe //nologo //E:JScript "%~f0" is-ipv4 "%WSL_IP%" >nul
+    if errorlevel 1 set "WSL_IP="
+)
 if "%WSL_IP%"=="" (
-    for /f "tokens=1" %%I in ('wsl.exe -d %DISTRO% -u root -- hostname -I') do set "WSL_IP=%%I"
+    for /f "tokens=1" %%I in ('wsl.exe -d "%DISTRO%" -u root -- hostname -I 2^>nul') do set "WSL_IP=%%I"
+)
+if not "%WSL_IP%"=="" (
+    cscript.exe //nologo //E:JScript "%~f0" is-ipv4 "%WSL_IP%" >nul
+    if errorlevel 1 set "WSL_IP="
 )
 if "%WSL_IP%"=="" (
     echo ERROR: cannot determine WSL IP for portproxy.
@@ -317,7 +345,7 @@ for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-t
 for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-to-wsl "%TARGET%"`) do set "TARGET_WSL=%%P"
 echo.
 echo === Ubuntu stage status ===
-wsl.exe -d %DISTRO% -u root -- bash "%STAGE_WSL%" --mode status --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%"
+wsl.exe -d "%DISTRO%" -u root -- bash "%STAGE_WSL%" --mode status --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%"
 exit /b %ERRORLEVEL%
 
 */
@@ -430,15 +458,60 @@ function wslconfig(path, mode, backupDir, dryRun) {
     WScript.Echo("updated");
 }
 
+function escapeRegExp(s) {
+    return String(s).replace(/([.*+?^${}()|\[\]\/\\])/g, "\\$1");
+}
+
+function decodeJsonString(s) {
+    return String(s)
+        .replace(/\\u([0-9a-fA-F]{4})/g, function(_, hex) {
+            return String.fromCharCode(parseInt(hex, 16));
+        })
+        .replace(/\\"/g, "\"")
+        .replace(/\\\\/g, "\\")
+        .replace(/\\\//g, "/")
+        .replace(/\\b/g, "\b")
+        .replace(/\\f/g, "\f")
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "\r")
+        .replace(/\\t/g, "\t");
+}
+
 function jsonField(path, field) {
     var text = readFile(path);
     if (!text) WScript.Quit(1);
-    var obj = eval("(" + text + ")");
-    if (obj && obj.hasOwnProperty(field)) {
-        WScript.Echo(String(obj[field]));
-        WScript.Quit(0);
+    if (!/^\s*\{/.test(text)) WScript.Quit(1);
+    if (typeof JSON !== "undefined" && JSON.parse) {
+        try {
+            var obj = JSON.parse(text);
+            if (obj && obj.hasOwnProperty(field)) {
+                WScript.Echo(String(obj[field]));
+                WScript.Quit(0);
+            }
+        } catch (e) {
+            WScript.Quit(1);
+        }
     }
-    WScript.Quit(1);
+    var re = new RegExp("\"" + escapeRegExp(field) + "\"\\s*:\\s*(\"(?:[^\"\\\\]|\\\\.)*\"|[^,}\\r\\n]+)");
+    var match = re.exec(text);
+    if (!match) WScript.Quit(1);
+    var value = trim(match[1]);
+    if (value.charAt(0) === "\"" && value.charAt(value.length - 1) === "\"") {
+        value = decodeJsonString(value.substring(1, value.length - 1));
+    }
+    WScript.Echo(value);
+    WScript.Quit(0);
+}
+
+function isIPv4(value) {
+    var parts = trim(value).split(".");
+    if (parts.length !== 4) WScript.Quit(1);
+    for (var i = 0; i < parts.length; i++) {
+        if (!/^[0-9]+$/.test(parts[i])) WScript.Quit(1);
+        var n = Number(parts[i]);
+        if (n < 0 || n > 255) WScript.Quit(1);
+    }
+    WScript.Quit(0);
 }
 
 if (args.length < 1) WScript.Quit(2);
@@ -453,6 +526,8 @@ if (command === "windows-version") {
     wslconfig(args.Item(1), args.Item(2), args.Item(3), args.Item(4));
 } else if (command === "json-field") {
     jsonField(args.Item(1), args.Item(2));
+} else if (command === "is-ipv4") {
+    isIPv4(args.Item(1));
 } else {
     WScript.Echo("Unknown helper command: " + command);
     WScript.Quit(2);
