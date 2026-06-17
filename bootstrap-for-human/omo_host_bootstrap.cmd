@@ -16,10 +16,19 @@ set "WIN_VERSION=unknown"
 set "WIN_BUILD=0"
 set "NETWORK_MODE=best-effort"
 set "WSL_SHUTDOWN_NEEDED=0"
+set "REBOOT_REQUIRED=0"
 set "STATUS_TMP=%TEMP%\omo-bootstrap-status.json"
+set "SHOW_HELP=0"
 
+call :main %*
+set "OMO_BOOTSTRAP_EXIT=%ERRORLEVEL%"
+call :pause_before_exit %OMO_BOOTSTRAP_EXIT%
+exit /b %OMO_BOOTSTRAP_EXIT%
+
+:main
 call :parse_args %*
 if errorlevel 1 exit /b 2
+if "%SHOW_HELP%"=="1" exit /b 0
 
 if /I not "%MODE%"=="install" if /I not "%MODE%"=="repair" if /I not "%MODE%"=="status" (
     echo Invalid /mode value: %MODE%
@@ -65,6 +74,18 @@ call :log "OmO host bootstrap complete."
 call :log "OpenCode URL: http://127.0.0.1:%PORT%/"
 exit /b 0
 
+:pause_before_exit
+set "OMO_BOOTSTRAP_EXIT=%~1"
+echo.
+if "%OMO_BOOTSTRAP_EXIT%"=="0" (
+    echo OmO host bootstrap finished successfully.
+) else (
+    echo OmO host bootstrap finished with exit code %OMO_BOOTSTRAP_EXIT%.
+)
+echo Press any key to close this window...
+pause >nul
+exit /b 0
+
 :parse_args
 if "%~1"=="" exit /b 0
 if /I "%~1"=="/mode" (
@@ -108,6 +129,7 @@ echo Unknown argument: %~1
 goto usage_error
 
 :usage
+set "SHOW_HELP=1"
 echo Usage: omo_host_bootstrap.cmd [/mode install^|repair^|status] [/distro Ubuntu] [/target C:\AI\omostack] [/port 4096] [/repo URL] [/dry-run]
 echo.
 echo Windows host bootstrap. No PowerShell is used. install/repair require Run as administrator unless /dry-run is used.
@@ -162,18 +184,22 @@ if "%DRY_RUN%"=="1" (
     call :log "[dry-run] dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart"
     call :log "[dry-run] dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart"
 ) else (
-    dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart >>"%LOG_FILE%" 2>&1
+    call :enable_windows_feature Microsoft-Windows-Subsystem-Linux
     if errorlevel 1 exit /b 1
-    dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart >>"%LOG_FILE%" 2>&1
+    call :enable_windows_feature VirtualMachinePlatform
     if errorlevel 1 exit /b 1
 )
+
+call :update_wsl
+if errorlevel 1 exit /b 1
 
 call :log "Setting WSL default version and Ubuntu Insights opt-out."
 if "%DRY_RUN%"=="1" (
     call :log "[dry-run] wsl.exe --set-default-version 2"
     call :log "[dry-run] reg.exe add HKCU\Software\Canonical\Ubuntu /v UbuntuInsightsConsent /t REG_DWORD /d 0 /f"
 ) else (
-    wsl.exe --set-default-version 2 >>"%LOG_FILE%" 2>&1
+    call :set_wsl_default_version
+    if errorlevel 1 exit /b 1
     reg.exe add HKCU\Software\Canonical\Ubuntu /v UbuntuInsightsConsent /t REG_DWORD /d 0 /f >>"%LOG_FILE%" 2>&1
 )
 
@@ -188,9 +214,9 @@ cscript.exe //nologo //E:JScript "%~f0" distro-exists "%DISTRO%" >nul
 if errorlevel 1 (
     call :log "WSL distro %DISTRO% is missing."
     if "%DRY_RUN%"=="1" (
-        call :log "[dry-run] wsl.exe --install -d %DISTRO% --no-launch"
+        call :log "[dry-run] wsl.exe --install -d %DISTRO% --no-launch --web-download"
     ) else (
-        wsl.exe --install -d "%DISTRO%" --no-launch >>"%LOG_FILE%" 2>&1
+        call :install_wsl_distro
         if errorlevel 1 exit /b 1
     )
 ) else (
@@ -203,8 +229,18 @@ if not "%DRY_RUN%"=="1" (
 )
 
 if "%DRY_RUN%"=="1" goto dry_run_set_default
-wsl.exe --set-default "%DISTRO%" >>"%LOG_FILE%" 2>&1
-if errorlevel 1 exit /b 1
+wsl.exe --set-default %DISTRO% >>"%LOG_FILE%" 2>&1
+set "WSL_SET_DEFAULT_EXIT=%ERRORLEVEL%"
+if not "%WSL_SET_DEFAULT_EXIT%"=="0" (
+    if "%REBOOT_REQUIRED%"=="1" (
+        echo ERROR: Windows reported that a restart is required before WSL can finish setup.
+        echo Restart Windows, then rerun this script.
+    ) else (
+        echo ERROR: wsl.exe --set-default %DISTRO% failed with exit code %WSL_SET_DEFAULT_EXIT%.
+    )
+    echo See log: %LOG_FILE%
+    exit /b 1
+)
 goto after_set_default
 
 :dry_run_set_default
@@ -223,13 +259,78 @@ call :log "[dry-run] wsl.exe --shutdown"
 :after_shutdown
 exit /b 0
 
+:enable_windows_feature
+set "FEATURE_NAME=%~1"
+dism.exe /online /enable-feature /featurename:%FEATURE_NAME% /all /norestart >>"%LOG_FILE%" 2>&1
+set "DISM_EXIT=%ERRORLEVEL%"
+if "%DISM_EXIT%"=="0" exit /b 0
+if "%DISM_EXIT%"=="3010" (
+    set "REBOOT_REQUIRED=1"
+    call :log "WARN: %FEATURE_NAME% enabled, but Windows requires a restart before WSL may work."
+    exit /b 0
+)
+echo ERROR: DISM failed while enabling %FEATURE_NAME% with exit code %DISM_EXIT%.
+echo See log: %LOG_FILE%
+exit /b 1
+
+:update_wsl
+call :log "Updating WSL."
+if "%DRY_RUN%"=="1" (
+    call :log "[dry-run] wsl.exe --update --web-download"
+    exit /b 0
+)
+wsl.exe --update --web-download >>"%LOG_FILE%" 2>&1
+set "WSL_UPDATE_EXIT=%ERRORLEVEL%"
+if "%WSL_UPDATE_EXIT%"=="0" exit /b 0
+call :log "WARN: wsl.exe --update --web-download failed with exit code %WSL_UPDATE_EXIT%; retrying without --web-download."
+wsl.exe --update >>"%LOG_FILE%" 2>&1
+set "WSL_UPDATE_EXIT=%ERRORLEVEL%"
+if "%WSL_UPDATE_EXIT%"=="0" exit /b 0
+call :log "WARN: wsl.exe --update failed with exit code %WSL_UPDATE_EXIT%; continuing to distro installation."
+exit /b 0
+
+:set_wsl_default_version
+wsl.exe --set-default-version 2 >>"%LOG_FILE%" 2>&1
+set "WSL_DEFAULT_VERSION_EXIT=%ERRORLEVEL%"
+if "%WSL_DEFAULT_VERSION_EXIT%"=="0" exit /b 0
+if "%REBOOT_REQUIRED%"=="1" (
+    call :log "WARN: wsl.exe --set-default-version 2 failed before the pending Windows restart; continuing to the distro install attempt."
+    exit /b 0
+)
+echo ERROR: wsl.exe --set-default-version 2 failed with exit code %WSL_DEFAULT_VERSION_EXIT%.
+echo See log: %LOG_FILE%
+exit /b 1
+
+:install_wsl_distro
+call :log "Installing WSL distro %DISTRO%."
+wsl.exe --install -d %DISTRO% --no-launch --web-download >>"%LOG_FILE%" 2>&1
+set "WSL_INSTALL_EXIT=%ERRORLEVEL%"
+if "%WSL_INSTALL_EXIT%"=="0" exit /b 0
+call :log "WARN: wsl.exe --install -d %DISTRO% --no-launch --web-download failed with exit code %WSL_INSTALL_EXIT%; retrying without --web-download."
+wsl.exe --install -d %DISTRO% --no-launch >>"%LOG_FILE%" 2>&1
+set "WSL_INSTALL_EXIT=%ERRORLEVEL%"
+if "%WSL_INSTALL_EXIT%"=="0" exit /b 0
+if "%REBOOT_REQUIRED%"=="1" (
+    echo ERROR: Windows enabled WSL features but requires a restart before distro installation can complete.
+    echo Restart Windows, then rerun this script.
+) else (
+    echo ERROR: wsl.exe --install -d %DISTRO% --no-launch failed with exit code %WSL_INSTALL_EXIT%.
+)
+echo See log: %LOG_FILE%
+exit /b 1
+
 :verify_distro_available
 cscript.exe //nologo //E:JScript "%~f0" distro-exists "%DISTRO%" >nul
 if errorlevel 1 (
-    echo ERROR: WSL distro %DISTRO% is not available %~1.
-    echo Windows may need a reboot after enabling WSL features, or the distro install may still be pending.
-    echo Rerun this script after reboot. If it still fails, install Ubuntu manually with:
-    echo   wsl.exe --install -d %DISTRO%
+    if "%REBOOT_REQUIRED%"=="1" (
+        echo ERROR: WSL distro %DISTRO% is not available %~1 because Windows still needs a restart.
+        echo Restart Windows, then rerun this script.
+    ) else (
+        echo ERROR: WSL distro %DISTRO% is not available %~1.
+        echo Windows may need a reboot after enabling WSL features, or the distro install may still be pending.
+        echo Rerun this script after reboot. If it still fails, install Ubuntu manually with:
+        echo   wsl.exe --install -d %DISTRO%
+    )
     exit /b 1
 )
 exit /b 0
@@ -250,10 +351,10 @@ for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-t
 for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-to-wsl "%TARGET%"`) do set "TARGET_WSL=%%P"
 
 if "%DRY_RUN%"=="1" (
-    call :log "[dry-run] wsl.exe -d ""%DISTRO%"" -u root -- bash %STAGE_WSL% --mode %MODE% --target %TARGET_WSL% --repo %REPO% --port %PORT% --yes --host-managed --dry-run"
+    call :log "[dry-run] wsl.exe -d %DISTRO% -u root -- bash %STAGE_WSL% --mode %MODE% --target %TARGET_WSL% --repo %REPO% --port %PORT% --yes --host-managed --dry-run"
     cscript.exe //nologo //E:JScript "%~f0" distro-exists "%DISTRO%" >nul
     if errorlevel 1 exit /b 0
-    wsl.exe -d "%DISTRO%" -u root -- bash "%STAGE_WSL%" --mode "%MODE%" --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%" --yes --host-managed --dry-run
+    wsl.exe -d %DISTRO% -u root -- bash "%STAGE_WSL%" --mode "%MODE%" --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%" --yes --host-managed --dry-run
     if errorlevel 1 exit /b 1
     exit /b 0
 )
@@ -262,7 +363,7 @@ call :verify_distro_available "before Ubuntu stage"
 if errorlevel 1 exit /b 1
 
 call :log "Running Ubuntu stage through WSL."
-wsl.exe -d "%DISTRO%" -u root -- bash "%STAGE_WSL%" --mode "%MODE%" --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%" --yes --host-managed
+wsl.exe -d %DISTRO% -u root -- bash "%STAGE_WSL%" --mode "%MODE%" --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%" --yes --host-managed
 exit /b %ERRORLEVEL%
 
 :configure_windows_access
@@ -271,7 +372,7 @@ if "%DRY_RUN%"=="1" (
     exit /b 0
 )
 
-wsl.exe -d "%DISTRO%" -u root -- cat /root/.local/state/omo-bootstrap/host-status.json > "%STATUS_TMP%" 2>>"%LOG_FILE%"
+wsl.exe -d %DISTRO% -u root -- cat /root/.local/state/omo-bootstrap/host-status.json > "%STATUS_TMP%" 2>>"%LOG_FILE%"
 if errorlevel 1 (
     echo ERROR: Ubuntu stage status JSON was not available.
     exit /b 1
@@ -284,7 +385,7 @@ if not "%WSL_IP%"=="" (
     if errorlevel 1 set "WSL_IP="
 )
 if "%WSL_IP%"=="" (
-    for /f "tokens=1" %%I in ('wsl.exe -d "%DISTRO%" -u root -- hostname -I 2^>nul') do set "WSL_IP=%%I"
+    for /f "tokens=1" %%I in ('wsl.exe -d %DISTRO% -u root -- hostname -I 2^>nul') do set "WSL_IP=%%I"
 )
 if not "%WSL_IP%"=="" (
     cscript.exe //nologo //E:JScript "%~f0" is-ipv4 "%WSL_IP%" >nul
@@ -345,7 +446,7 @@ for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-t
 for /f "usebackq delims=" %%P in (`cscript.exe //nologo //E:JScript "%~f0" win-to-wsl "%TARGET%"`) do set "TARGET_WSL=%%P"
 echo.
 echo === Ubuntu stage status ===
-wsl.exe -d "%DISTRO%" -u root -- bash "%STAGE_WSL%" --mode status --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%"
+wsl.exe -d %DISTRO% -u root -- bash "%STAGE_WSL%" --mode status --target "%TARGET_WSL%" --repo "%REPO%" --port "%PORT%"
 exit /b %ERRORLEVEL%
 
 */
