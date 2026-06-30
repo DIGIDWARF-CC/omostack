@@ -13,13 +13,21 @@ Use this file first when an agent opens this omostack home.
 
 ## 2. New Install? Confirm Host Bootstrap First
 
-If this is a fresh clone of the repository, the human-facing first step is the Windows host bootstrap from an elevated Command Prompt:
+If this is a fresh clone, choose a profile:
+
+- Light: standard OpenCode Build/Plan plus built-in General/Explore/Scout.
+- Full: OpenCode plus Oh My OpenAgent orchestration.
+
+Run the selected Windows host bootstrap from an elevated Command Prompt:
 
 ```cmd
 bootstrap-for-human\omo_host_bootstrap.cmd /mode install /target C:\AI\omostack /port 4096
+bootstrap-for-human-light\omo_host_bootstrap.cmd /mode install /target C:\AI\omostack /port 4096
 ```
 
-After that, agents run stage-2:
+Run only one command. A managed light install can later be upgraded by running the full command; the light installer never removes a full profile.
+
+After that, agents may run profile-aware stage-2:
 
 ```bash
 .agent-docs/scripts/OOBE-setup.sh --auto

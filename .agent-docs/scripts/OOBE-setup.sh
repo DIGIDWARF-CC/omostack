@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Stage-2 OOBE setup for agents running inside WSL/Linux.
-# Human bootstrap starts from bootstrap-for-human/omo_host_bootstrap.cmd.
+# Human bootstrap starts from the selected full or light bootstrap folder.
 set -euo pipefail
 
 AUTO=false
 DRY_RUN=false
+PROFILE=auto
 while [ $# -gt 0 ]; do
     case "$1" in
         --auto) AUTO=true; shift ;;
         --dry-run) DRY_RUN=true; shift ;;
-        *) echo "Usage: OOBE-setup.sh [--auto] [--dry-run]"; exit 1 ;;
+        --profile)
+            PROFILE="${2:-}"
+            shift 2
+            ;;
+        *) echo "Usage: OOBE-setup.sh [--auto] [--dry-run] [--profile light|full]"; exit 1 ;;
     esac
 done
 
@@ -19,6 +24,55 @@ opencode_config="$xdg_config/opencode"
 state_dir="$repo_root/.my-omo"
 state_file="$state_dir/install-state.json"
 marker_file="$state_dir/omostack-base-install-done"
+bootstrap_state="${XDG_STATE_HOME:-$HOME/.local/state}/omo-bootstrap"
+profile_file="$bootstrap_state/install-profile"
+
+detect_profile() {
+    local value=""
+    if [ -r "$profile_file" ]; then
+        IFS= read -r value < "$profile_file" || true
+        case "$value" in
+            light|full)
+                printf '%s\n' "$value"
+                return
+                ;;
+        esac
+    fi
+    if grep -Rqs '"oh-my-openagent' \
+        "$opencode_config/opencode.json" \
+        "$opencode_config/opencode.jsonc" 2>/dev/null; then
+        printf 'full\n'
+    else
+        printf 'unknown\n'
+    fi
+}
+
+installed_profile="$(detect_profile)"
+profile_managed=false
+if [ -r "$profile_file" ]; then
+    case "$installed_profile" in
+        light|full) profile_managed=true ;;
+    esac
+fi
+if [ "$PROFILE" = auto ]; then
+    if [ "$installed_profile" = unknown ]; then
+        PROFILE=full
+    else
+        PROFILE="$installed_profile"
+    fi
+fi
+case "$PROFILE" in
+    light|full) ;;
+    *) echo "Invalid --profile value: $PROFILE" >&2; exit 2 ;;
+esac
+if [ "$PROFILE" = light ] && [ "$installed_profile" = full ]; then
+    echo "Refusing full -> light downgrade. The existing full OmOStack installation was not changed." >&2
+    exit 1
+fi
+if [ "$PROFILE" = full ] && [ "$installed_profile" = light ]; then
+    echo "Profile promotion is owned by the full Windows bootstrap. Run bootstrap-for-human\\omo_host_bootstrap.cmd." >&2
+    exit 1
+fi
 
 log() { printf '%s\n' "$*"; }
 run_or_echo() {
@@ -91,14 +145,22 @@ log "=== OmO Stage-2 OOBE ==="
 log "Repo root: $repo_root"
 log "Mode: $([ "$DRY_RUN" = true ] && echo dry-run || echo real-run)"
 log "OS: $(detect_os)"
+log "Install profile: $PROFILE"
 
 log "[1/7] Tool inventory"
-for cmd in opencode oh-my-openagent comment-checker node npm git curl systemctl; do
+for cmd in opencode node npm git curl systemctl; do
     log "  $cmd: $(tool_version "$cmd")"
 done
+if [ "$PROFILE" = full ]; then
+    for cmd in oh-my-openagent comment-checker; do
+        log "  $cmd: $(tool_version "$cmd")"
+    done
+fi
 
-log "[2/7] Optional agent tools"
-if command -v npm >/dev/null 2>&1; then
+log "[2/7] Profile tools"
+if [ "$PROFILE" = light ]; then
+    log "  light profile: OmO and comment-checker are intentionally not installed"
+elif command -v npm >/dev/null 2>&1; then
     if command -v oh-my-openagent >/dev/null 2>&1; then
         log "  present: oh-my-openagent"
     elif [ "$AUTO" = true ]; then
@@ -125,34 +187,51 @@ else
     mkdir -p "$opencode_config"
 fi
 
-if [ -f "$opencode_config/opencode.json" ] && [ -f "$opencode_config/opencode.jsonc" ]; then
+manage_profile_files=true
+if [ "$profile_managed" = false ] && { [ -f "$opencode_config/opencode.json" ] || [ -f "$opencode_config/opencode.jsonc" ]; }; then
+    manage_profile_files=false
+    log "  unmanaged OpenCode config detected; preserving all profile config files unchanged"
+elif [ -f "$opencode_config/opencode.json" ] && [ -f "$opencode_config/opencode.jsonc" ]; then
     archive_file "$opencode_config/opencode.jsonc"
 fi
 
-if [ ! -f "$opencode_config/opencode.json" ] && [ ! -f "$opencode_config/opencode.jsonc" ]; then
-    copy_if_missing "$repo_root/.agent-docs/templates/opencode-global.example.jsonc" "$opencode_config/opencode.json"
+if [ "$manage_profile_files" = false ]; then
+    :
+elif [ ! -f "$opencode_config/opencode.json" ] && [ ! -f "$opencode_config/opencode.jsonc" ]; then
+    if [ "$PROFILE" = light ]; then
+        copy_if_missing "$repo_root/.agent-docs/templates/opencode-light.example.jsonc" "$opencode_config/opencode.json"
+    else
+        copy_if_missing "$repo_root/.agent-docs/templates/opencode-global.example.jsonc" "$opencode_config/opencode.json"
+    fi
+    profile_managed=true
 elif [ -f "$opencode_config/opencode.json" ]; then
     log "  present: OpenCode config"
-    if ! grep -Rqs '"oh-my-openagent"' "$opencode_config"/opencode.json "$opencode_config"/opencode.jsonc 2>/dev/null; then
+    if [ "$PROFILE" = full ] && ! grep -Rqs '"oh-my-openagent' "$opencode_config"/opencode.json "$opencode_config"/opencode.jsonc 2>/dev/null; then
         log "  warning: config does not mention oh-my-openagent; add it manually if this stack needs the plugin"
     fi
 else
     log "  present: OpenCode JSONC config"
 fi
 
-if [ -f "$opencode_config/oh-my-openagent.json" ] && [ -f "$opencode_config/oh-my-openagent.jsonc" ]; then
-    archive_file "$opencode_config/oh-my-openagent.jsonc"
-fi
-if [ ! -f "$opencode_config/oh-my-openagent.json" ] && [ ! -f "$opencode_config/oh-my-openagent.jsonc" ]; then
-    copy_if_missing "$repo_root/.agent-docs/templates/oh-my-openagent.example.jsonc" "$opencode_config/oh-my-openagent.json"
+if [ "$manage_profile_files" = false ]; then
+    log "  profile-specific OmO/TUI/instruction files were not changed"
+elif [ "$PROFILE" = light ]; then
+    log "  light profile: OmO config, stack instructions, and TUI plugin are not installed"
 else
-    log "  present: Oh My OpenAgent config"
-fi
-copy_if_missing "$repo_root/.agent-docs/templates/opencode-agent-stack.md" "$opencode_config/opencode-agent-stack.md"
-if [ ! -f "$opencode_config/tui.json" ]; then
-    write_file "$opencode_config/tui.json" '{ "plugin": ["oh-my-openagent/tui"] }'
-else
-    log "  present: $opencode_config/tui.json"
+    if [ -f "$opencode_config/oh-my-openagent.json" ] && [ -f "$opencode_config/oh-my-openagent.jsonc" ]; then
+        archive_file "$opencode_config/oh-my-openagent.jsonc"
+    fi
+    if [ ! -f "$opencode_config/oh-my-openagent.json" ] && [ ! -f "$opencode_config/oh-my-openagent.jsonc" ]; then
+        copy_if_missing "$repo_root/.agent-docs/templates/oh-my-openagent.example.jsonc" "$opencode_config/oh-my-openagent.json"
+    else
+        log "  present: Oh My OpenAgent config"
+    fi
+    copy_if_missing "$repo_root/.agent-docs/templates/opencode-agent-stack.md" "$opencode_config/opencode-agent-stack.md"
+    if [ ! -f "$opencode_config/tui.json" ]; then
+        write_file "$opencode_config/tui.json" '{ "plugin": ["oh-my-openagent/tui"] }'
+    else
+        log "  present: $opencode_config/tui.json"
+    fi
 fi
 
 log "[4/7] Systemd service"
@@ -207,13 +286,22 @@ if [ "$DRY_RUN" = true ]; then
 else
     mkdir -p "$state_dir"
     touch "$marker_file"
+    if [ "$profile_managed" = true ] && [ ! -e "$profile_file" ]; then
+        mkdir -p "$(dirname "$profile_file")"
+        printf '%s\n' "$PROFILE" > "$profile_file"
+    fi
+    omo_bin=""
+    if [ "$PROFILE" = full ]; then
+        omo_bin="$(command -v oh-my-openagent 2>/dev/null || true)"
+    fi
     cat > "$state_file" <<JSON
 {
   "installed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "repo_root": "$repo_root",
   "stage": "wsl-agent-stage-2",
+  "profile": "$PROFILE",
   "opencode": "$(command -v opencode 2>/dev/null || true)",
-  "oh_my_openagent": "$(command -v oh-my-openagent 2>/dev/null || true)"
+  "oh_my_openagent": "$omo_bin"
 }
 JSON
 fi

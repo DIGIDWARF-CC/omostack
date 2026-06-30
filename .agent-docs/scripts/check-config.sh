@@ -10,8 +10,28 @@ repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 xdg_config="${XDG_CONFIG_HOME:-$HOME/.config}"
 config_root="$xdg_config/opencode"
 project_config="$repo_root/.opencode"
+profile_file="${XDG_STATE_HOME:-$HOME/.local/state}/omo-bootstrap/install-profile"
 
 emit() { printf '{"check":"%s","status":"%s","detail":"%s"}\n' "$1" "$2" "$3"; }
+
+detect_profile() {
+    local value=""
+    if [ -r "$profile_file" ]; then
+        IFS= read -r value < "$profile_file" || true
+        case "$value" in
+            light|full) printf '%s\n' "$value"; return ;;
+        esac
+    fi
+    if grep -Rqs '"oh-my-openagent' \
+        "$config_root/opencode.json" \
+        "$config_root/opencode.jsonc" 2>/dev/null; then
+        printf 'full\n'
+    else
+        printf 'unknown\n'
+    fi
+}
+
+install_profile="$(detect_profile)"
 
 is_json_readable() {
     local file="$1"
@@ -20,7 +40,16 @@ is_json_readable() {
 }
 
 echo "=== Config Audit ==="
-[ "$DRY_RUN" = true ] && echo "(dry-run mode)" || true
+if [ "$DRY_RUN" = true ]; then
+    echo "(dry-run mode)"
+fi
+if [ ! -r "$profile_file" ]; then
+    emit "install-profile" "missing" "no valid installer profile marker at $profile_file; inferred $install_profile"
+elif [ "$install_profile" = unknown ]; then
+    emit "install-profile" "missing" "no valid installer profile marker at $profile_file"
+else
+    emit "install-profile" "present" "$install_profile"
+fi
 
 # Check all candidate config files
 candidates=(
@@ -84,7 +113,7 @@ if [ -f "$opencode_json" ]; then
     if grep -q '"oh-my-opencode"' "$opencode_json"; then
         emit "plugin-name" "unhealthy" "legacy plugin name 'oh-my-opencode' found in opencode.json — change to 'oh-my-openagent'"
         plugin_found=true
-    elif grep -q '"oh-my-openagent"' "$opencode_json"; then
+    elif grep -q '"oh-my-openagent' "$opencode_json"; then
         emit "plugin-name" "present" "current plugin name 'oh-my-openagent' found in opencode.json"
         plugin_found=true
     fi
@@ -93,13 +122,27 @@ fi
 if [ "$plugin_found" = false ] && [ -f "$opencode_jsonc" ]; then
     if grep -q '"oh-my-opencode"' "$opencode_jsonc"; then
         emit "plugin-name" "unhealthy" "legacy plugin name 'oh-my-opencode' found in opencode.jsonc — change to 'oh-my-openagent'"
-    elif grep -q '"oh-my-openagent"' "$opencode_jsonc"; then
+        plugin_found=true
+    elif grep -q '"oh-my-openagent' "$opencode_jsonc"; then
         emit "plugin-name" "present" "current plugin name 'oh-my-openagent' found in opencode.jsonc"
+        plugin_found=true
     else
-        emit "plugin-name" "missing" "no oh-my plugin entry found in opencode config — add: \"plugin\": [\"oh-my-openagent\"]"
+        if [ "$install_profile" = light ]; then
+            emit "plugin-name" "present" "OmO plugin is intentionally absent in the light profile"
+        else
+            emit "plugin-name" "missing" "no oh-my plugin entry found in OpenCode config"
+        fi
     fi
 elif [ "$plugin_found" = false ]; then
-    emit "plugin-name" "missing" "opencode.json not found at $opencode_json or $opencode_jsonc"
+    if [ "$install_profile" = light ] && { [ -f "$opencode_json" ] || [ -f "$opencode_jsonc" ]; }; then
+        emit "plugin-name" "present" "OmO plugin is intentionally absent in the light profile"
+    else
+        emit "plugin-name" "missing" "OpenCode config not found at $opencode_json or $opencode_jsonc"
+    fi
+fi
+
+if [ "$install_profile" = light ] && [ "$plugin_found" = true ]; then
+    emit "profile-plugin-consistency" "unhealthy" "OmO plugin is present while the installer profile is light"
 fi
 
 echo ""

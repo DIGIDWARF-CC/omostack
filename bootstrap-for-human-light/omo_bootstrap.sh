@@ -6,7 +6,7 @@ IFS=$'\n\t'
 DEFAULT_REPO_URL="https://github.com/DIGIDWARF-CC/omostack.git"
 DEFAULT_PORT="4096"
 DEFAULT_TARGET="/mnt/c/AI/omostack"
-DEFAULT_PROFILE="full"
+DEFAULT_PROFILE="light"
 
 MODE="install"
 PROFILE="${OMO_INSTALL_PROFILE:-$DEFAULT_PROFILE}"

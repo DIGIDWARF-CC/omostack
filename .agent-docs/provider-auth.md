@@ -15,8 +15,8 @@ Provider auth checks must distinguish `missing` from `unhealthy`.
 ```powershell
 opencode auth list
 opencode --print-logs
+# Full profile only:
 bunx oh-my-openagent doctor
-bunx oh-my-opencode doctor --verbose
 ```
 
 ## Provider Notes

@@ -22,22 +22,31 @@ Adjust these values only when cloning this omostack home to another machine.
 
 ## Quick Start - OOBE Setup
 
-For a fresh clone of this repository:
+Choose one self-contained package:
 
-1. A human starts the Windows host bootstrap from an elevated Command Prompt:
+- `bootstrap-for-human-light`: standard OpenCode with Build/Plan and built-in subagents.
+- `bootstrap-for-human`: full OpenCode + Oh My OpenAgent orchestration.
+
+A human starts the selected Windows host bootstrap from an elevated Command Prompt:
 
 ```cmd
 bootstrap-for-human\omo_host_bootstrap.cmd /mode install /target C:\AI\omostack /port 4096
 ```
 
-2. After the host bootstrap has prepared Windows WSL settings, Ubuntu/OpenCode, and Windows loopback access, an agent continues inside WSL:
+The light package uses the same command name from its own folder:
+
+```cmd
+bootstrap-for-human-light\omo_host_bootstrap.cmd /mode install /target C:\AI\omostack /port 4096
+```
+
+After the host bootstrap has prepared Windows WSL settings, Ubuntu/OpenCode, and Windows loopback access, an agent can continue inside WSL:
 
 ```bash
 chmod +x .agent-docs/scripts/OOBE-setup.sh
 .agent-docs/scripts/OOBE-setup.sh --auto
 ```
 
-The Windows host bootstrapper is the human-facing installer. `OOBE-setup.sh` is stage-2 agent maintenance inside WSL/Linux. See `OOBE.md` for details.
+The Windows host bootstrapper is the human-facing installer. `OOBE-setup.sh` is profile-aware stage-2 agent maintenance inside WSL/Linux. A managed light installation can be upgraded in place by running the full package; full-to-light downgrade is intentionally refused. See `OOBE.md`.
 
 ---
 
@@ -88,6 +97,7 @@ See `.agent-docs/README.md` for the complete navigation map.
 | `.agent-docs/scripts/` | Bash scripts for maintenance, verification, and repair |
 | `bootstrap-for-human/omo_host_bootstrap.cmd` | Windows host bootstrapper for humans |
 | `bootstrap-for-human/omo_bootstrap.sh` | Root-only Ubuntu WSL stage called by the host bootstrapper |
+| `bootstrap-for-human-light/` | Self-contained light package with the same entry points |
 | `.agent-docs/recipes/troubleshoot.sh` | Interactive troubleshooting menu |
 | `.agent-docs/templates/` | Sanitized OpenCode / oh-my-openagent examples |
 | `.my-omo/remote-access/` | Canonical ignored folder for real remote-access keys and local pseudoconfigs |

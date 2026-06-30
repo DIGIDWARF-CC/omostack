@@ -44,7 +44,9 @@ WSL may have git installed for Windows but not exposed in the Linux PATH.
 | Desktop connection failure | unhealthy | Check OpenCode config for custom server settings | Remove or fix server override after backup |
 | Auth provider missing | missing auth | `opencode auth list` | Login through OpenCode provider flow |
 
-## oh-my-openagent Issues
+## oh-my-openagent Issues (Full Profile Only)
+
+These checks are not applicable to light. In light, absence of the OmO binary, config, and TUI plugin is expected.
 
 | Symptom | Likely State | First Check | Repair Path |
 |---------|--------------|-------------|-------------|

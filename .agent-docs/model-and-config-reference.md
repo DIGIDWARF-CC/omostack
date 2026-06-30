@@ -11,7 +11,9 @@ Legacy Windows paths (`%APPDATA%\opencode\`) are not used on WSL/Linux.
 
 Project-local config may exist in the opened project, but this repository should not carry real provider secrets.
 
-## oh-my-openagent Config Locations
+Both delivery profiles use `opencode/deepseek-v4-flash-free` as the main model and `opencode/north-mini-code-free` as the small model. The light profile uses the stock OpenCode Build/Plan roles and built-in General/Explore/Scout subagents. The full profile adds OmO.
+
+## oh-my-openagent Config Locations (Full Only)
 
 Current names (in order of precedence):
 1. `~/.config/opencode/oh-my-openagent.json` or `.jsonc`
@@ -22,7 +24,7 @@ Legacy names:
 
 If legacy and current files exist in the same config directory, treat this as an **unhealthy config collision**. Prefer current `oh-my-openagent` naming.
 
-## Plugin Naming
+## Plugin Naming (Full Only)
 
 OpenCode config (`opencode.json`, or compatible `opencode.jsonc`) must include:
 ```json
@@ -40,7 +42,7 @@ TUI config (`~/.config/opencode/tui.json`) must include:
 
 Legacy `oh-my-opencode` entries should be migrated only after config backup.
 
-## Global Installation (CRITICAL)
+## Global Installation (Full Only)
 
 **oh-my-openagent MUST be globally installed for full functionality:**
 
@@ -57,10 +59,12 @@ oh-my-openagent doctor  # all checks should pass
 
 **Why global?** The OpenCode server, TUI installer, and systemd integration all invoke the `oh-my-openagent` binary directly. Using `npx oh-my-openagent` works for one-off commands but breaks when other tools call it without npx.
 
+For light, the OmO plugin/config/TUI/instruction files and global packages must remain absent.
+
 ## Model Resolution
 
 Keep model overrides explicit and documented. If an agent behaves badly after model changes:
-1. Run `oh-my-openagent doctor`.
+1. For full, run `oh-my-openagent doctor`; skip this for light.
 2. Check provider auth: `opencode auth list`.
 3. Check config collision (legacy vs current names).
 4. Verify the model ID matches what the provider actually reports (check `/v1/models` endpoint for custom providers).

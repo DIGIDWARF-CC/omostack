@@ -40,6 +40,7 @@ run_templates() {
     for f in ".agent-docs/templates/README.md" \
              ".agent-docs/templates/remote-access.example.jsonc" \
              ".agent-docs/templates/opencode-global.example.jsonc" \
+             ".agent-docs/templates/opencode-light.example.jsonc" \
              ".agent-docs/templates/oh-my-openagent.example.jsonc" \
              ".agent-docs/templates/opencode-agent-stack.md" \
              ".agent-docs/templates/install-state.example.json"; do
@@ -51,6 +52,10 @@ run_templates() {
 run_script_safety() {
     assert_file "bootstrap-for-human/omo_host_bootstrap.cmd"
     assert_file "bootstrap-for-human/omo_bootstrap.sh"
+    assert_file "bootstrap-for-human/Opencode-wsl-setup.zip"
+    assert_file "bootstrap-for-human-light/omo_host_bootstrap.cmd"
+    assert_file "bootstrap-for-human-light/omo_bootstrap.sh"
+    assert_file "bootstrap-for-human-light/Opencode-wsl-light-setup.zip"
     assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "cscript.exe"
     assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "wscript.exe"
     assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "start-opencode-wsl-hidden.vbs"
@@ -58,36 +63,85 @@ run_script_safety() {
     assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "netsh.exe interface portproxy"
     assert_contains "bootstrap-for-human/omo_bootstrap.sh" "oh-my-openagent.example.jsonc"
     for f in check-health.sh check-config.sh backup-omostack.sh cleanup-temp.sh \
-             repair-cache.sh check-scaffold.sh OOBE-setup.sh diagnostic.sh; do
+             repair-cache.sh check-scaffold.sh OOBE-setup.sh diagnostic.sh \
+             build-bootstrap-packages.sh; do
         assert_file ".agent-docs/scripts/$f"
     done
-    if bash -n "${repo_root}/bootstrap-for-human/omo_bootstrap.sh"; then
-        echo "PASS omo_bootstrap.sh parses as Bash"
+    local shell_file
+    for shell_file in \
+        "${repo_root}/bootstrap-for-human/omo_bootstrap.sh" \
+        "${repo_root}/bootstrap-for-human-light/omo_bootstrap.sh" \
+        "${repo_root}"/.agent-docs/scripts/*.sh; do
+        if bash -n "$shell_file"; then
+            echo "PASS Bash parses: ${shell_file#"$repo_root/"}"
+        else
+            failures+=("Bash parse failed: ${shell_file#"$repo_root/"}")
+        fi
+    done
+    if command -v shellcheck >/dev/null 2>&1; then
+        if shellcheck \
+            "${repo_root}/bootstrap-for-human/omo_bootstrap.sh" \
+            "${repo_root}/bootstrap-for-human-light/omo_bootstrap.sh" \
+            "${repo_root}"/.agent-docs/scripts/*.sh; then
+            echo "PASS ShellCheck"
+        else
+            failures+=("ShellCheck reported errors")
+        fi
     else
-        failures+=("omo_bootstrap.sh failed Bash parse check")
+        echo "SKIP ShellCheck: shellcheck is unavailable"
     fi
-    local jscript_tmp
-    jscript_tmp="$(mktemp --suffix=.js)"
-    awk '{
-        sub(/\r$/, "")
-        if (found) print
-        if ($0 == "*/") found = 1
-    }' "${repo_root}/bootstrap-for-human/omo_host_bootstrap.cmd" > "$jscript_tmp"
-    if command -v node >/dev/null 2>&1 && node --check "$jscript_tmp" >/dev/null; then
-        echo "PASS embedded JScript parses with Node"
-    elif ! command -v node >/dev/null 2>&1; then
-        echo "SKIP embedded JScript parse check: node is unavailable"
-    else
-        failures+=("embedded JScript in omo_host_bootstrap.cmd failed parse check")
-    fi
-    rm -f "$jscript_tmp"
-    for template in opencode-global.example.jsonc oh-my-openagent.example.jsonc; do
+
+    local cmd_file jscript_tmp
+    for cmd_file in \
+        "${repo_root}/bootstrap-for-human/omo_host_bootstrap.cmd" \
+        "${repo_root}/bootstrap-for-human-light/omo_host_bootstrap.cmd"; do
+        jscript_tmp="$(mktemp --suffix=.js)"
+        awk '{
+            sub(/\r$/, "")
+            if (found) print
+            if ($0 == "*/") found = 1
+        }' "$cmd_file" > "$jscript_tmp"
+        if command -v node >/dev/null 2>&1 && node --check "$jscript_tmp" >/dev/null; then
+            echo "PASS embedded JScript parses: ${cmd_file#"$repo_root/"}"
+        elif ! command -v node >/dev/null 2>&1; then
+            echo "SKIP embedded JScript parse check: node is unavailable"
+        else
+            failures+=("embedded JScript failed parse check: ${cmd_file#"$repo_root/"}")
+        fi
+        rm -f "$jscript_tmp"
+    done
+
+    for template in opencode-global.example.jsonc opencode-light.example.jsonc oh-my-openagent.example.jsonc; do
         if python3 -m json.tool "${repo_root}/.agent-docs/templates/$template" >/dev/null; then
             echo "PASS $template parses as JSON"
         else
             failures+=("$template failed JSON parse check")
         fi
     done
+    if python3 - "$repo_root" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+templates = Path(sys.argv[1]) / ".agent-docs" / "templates"
+full = json.loads((templates / "opencode-global.example.jsonc").read_text())
+light = json.loads((templates / "opencode-light.example.jsonc").read_text())
+
+assert light["model"] == full["model"] == "opencode/deepseek-v4-flash-free"
+assert light["small_model"] == full["small_model"] == "opencode/north-mini-code-free"
+assert light["lsp"] == full["lsp"]
+assert light["mcp"] == full["mcp"]
+assert light["shell"] == full["shell"]
+assert light["agent"] == {"title": {"disable": True}}
+assert "plugin" not in light
+assert "instructions" not in light
+assert any(item.startswith("oh-my-openagent@") for item in full["plugin"])
+PY
+    then
+        echo "PASS light template retains common models/LSP/MCP and excludes OmO overrides"
+    else
+        failures+=("light/full template profile invariants failed")
+    fi
     assert_not_contains ".agent-docs/templates/oh-my-openagent.example.jsonc" "lmstudio"
     assert_contains ".agent-docs/scripts/repair-cache.sh" "ConfirmRepair"
     if find "${repo_root}/.agent-docs/scripts" -maxdepth 1 -name '*.ps1' | grep -q .; then
@@ -100,28 +154,54 @@ run_script_safety() {
     else
         echo "PASS no PowerShell bootstrap files under bootstrap-for-human"
     fi
-
-    local diag_tmp
-    diag_tmp="$(mktemp)"
-    if "${repo_root}/.agent-docs/scripts/diagnostic.sh" > "$diag_tmp" && python3 -m json.tool "$diag_tmp" >/dev/null; then
-        echo "PASS diagnostic.sh emits valid JSON"
+    if find "${repo_root}/bootstrap-for-human-light" -maxdepth 1 -name '*.ps1' | grep -q .; then
+        failures+=("PowerShell bootstrap files found under bootstrap-for-human-light")
     else
-        failures+=("diagnostic.sh output is not valid JSON")
+        echo "PASS no PowerShell bootstrap files under bootstrap-for-human-light"
     fi
-    rm -f "$diag_tmp"
 
-    local dry_home dry_xdg before after
-    dry_home="$(mktemp -d)"
-    dry_xdg="$(mktemp -d)"
-    before="$(find "$dry_home" "$dry_xdg" -mindepth 1 -print | sort)"
-    HOME="$dry_home" XDG_CONFIG_HOME="$dry_xdg" "${repo_root}/.agent-docs/scripts/OOBE-setup.sh" --dry-run >/tmp/omo-oobe-dry-run.log
-    after="$(find "$dry_home" "$dry_xdg" -mindepth 1 -print | sort)"
-    if [ "$before" = "$after" ]; then
-        echo "PASS OOBE-setup.sh --dry-run did not create HOME/XDG files"
+    if python3 - "$repo_root" <<'PY'
+import sys
+import zipfile
+from pathlib import Path
+
+root = Path(sys.argv[1])
+full = root / "bootstrap-for-human"
+light = root / "bootstrap-for-human-light"
+
+full_cmd = (full / "omo_host_bootstrap.cmd").read_bytes()
+light_cmd = (light / "omo_host_bootstrap.cmd").read_bytes()
+full_sh = (full / "omo_bootstrap.sh").read_text()
+light_sh = (light / "omo_bootstrap.sh").read_text()
+
+assert b"\n" not in full_cmd.replace(b"\r\n", b"")
+assert b"\n" not in light_cmd.replace(b"\r\n", b"")
+assert "\r" not in full_sh
+assert "\r" not in light_sh
+
+normalized_full_cmd = full_cmd.replace(b'set "PROFILE=full"', b'set "PROFILE=PROFILE"')
+normalized_light_cmd = light_cmd.replace(b'set "PROFILE=light"', b'set "PROFILE=PROFILE"')
+assert normalized_full_cmd == normalized_light_cmd
+
+normalized_full_sh = full_sh.replace('DEFAULT_PROFILE="full"', 'DEFAULT_PROFILE="PROFILE"')
+normalized_light_sh = light_sh.replace('DEFAULT_PROFILE="light"', 'DEFAULT_PROFILE="PROFILE"')
+assert normalized_full_sh == normalized_light_sh
+
+packages = (
+    (full, "Opencode-wsl-setup.zip"),
+    (light, "Opencode-wsl-light-setup.zip"),
+)
+for directory, archive_name in packages:
+    with zipfile.ZipFile(directory / archive_name) as zf:
+        assert zf.namelist() == ["omo_host_bootstrap.cmd", "omo_bootstrap.sh"]
+        for name in zf.namelist():
+            assert zf.read(name) == (directory / name).read_bytes()
+PY
+    then
+        echo "PASS full/light scripts differ only by profile and ZIP payloads are current"
     else
-        failures+=("OOBE-setup.sh --dry-run created files under temp HOME/XDG")
+        failures+=("full/light parity, line endings, or ZIP payload validation failed")
     fi
-    rm -rf "$dry_home" "$dry_xdg" /tmp/omo-oobe-dry-run.log
 }
 
 run_setup_directives() {

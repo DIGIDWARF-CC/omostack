@@ -1,0 +1,134 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "compaction": {
+    "auto": false
+  },
+  "model": "opencode/deepseek-v4-flash-free",
+  "small_model": "opencode/north-mini-code-free",
+  "lsp": {
+    "typescript": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "typescript@5.9.3",
+        "--package",
+        "typescript-language-server@5.3.0",
+        "typescript-language-server",
+        "--stdio"
+      ],
+      "extensions": [
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".mts",
+        ".cts"
+      ]
+    },
+    "html": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "vscode-langservers-extracted@4.10.0",
+        "vscode-html-language-server",
+        "--stdio"
+      ],
+      "extensions": [
+        ".html",
+        ".htm",
+        ".htmldjango",
+        ".handlebars"
+      ]
+    },
+    "css": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "vscode-langservers-extracted@4.10.0",
+        "vscode-css-language-server",
+        "--stdio"
+      ],
+      "extensions": [
+        ".css",
+        ".scss",
+        ".less"
+      ]
+    },
+    "json": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "vscode-langservers-extracted@4.10.0",
+        "vscode-json-language-server",
+        "--stdio"
+      ],
+      "extensions": [
+        ".json",
+        ".jsonc"
+      ]
+    },
+    "python": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "pyright@1.1.411",
+        "pyright-langserver",
+        "--stdio"
+      ],
+      "extensions": [
+        ".py",
+        ".pyi"
+      ]
+    },
+    "php": {
+      "command": [
+        "npx",
+        "-y",
+        "intelephense@1.18.5",
+        "--stdio"
+      ],
+      "extensions": [
+        ".php",
+        ".phtml",
+        ".module",
+        ".inc"
+      ]
+    }
+  },
+  "agent": {
+    "title": {
+      "disable": true
+    }
+  },
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp@0.0.75",
+        "--headless",
+        "--browser",
+        "chrome",
+        "--no-sandbox",
+        "--isolated",
+        "--viewport-size",
+        "800x600"
+      ],
+      "enabled": true,
+      "timeout": 360000,
+      "environment": {
+        "TMPDIR": "/tmp",
+        "TMP": "/tmp",
+        "TEMP": "/tmp",
+        "XDG_RUNTIME_DIR": "/tmp/opencode-runtime-root"
+      }
+    }
+  },
+  "shell": "/bin/bash"
+}

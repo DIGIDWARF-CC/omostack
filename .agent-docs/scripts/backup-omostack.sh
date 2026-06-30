@@ -19,6 +19,7 @@ fi
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 xdg_config="${XDG_CONFIG_HOME:-$HOME/.config}"
+xdg_state="${XDG_STATE_HOME:-$HOME/.local/state}"
 timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 includes=(
@@ -29,6 +30,8 @@ includes=(
     "$xdg_config/opencode/oh-my-openagent.json"
     "$xdg_config/opencode/oh-my-openagent.jsonc"
     "$xdg_config/opencode/tui.json"
+    "$xdg_state/omo-bootstrap/install-profile"
+    "$xdg_state/omo-bootstrap/host-status.json"
 )
 
 excludes=(

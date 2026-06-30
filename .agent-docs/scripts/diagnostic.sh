@@ -24,7 +24,9 @@ from pathlib import Path
 repo = Path(os.environ["OMO_REPO_ROOT"])
 home = Path.home()
 xdg_config = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+xdg_state = Path(os.environ.get("XDG_STATE_HOME", home / ".local/state"))
 opencode_dir = xdg_config / "opencode"
+profile_file = xdg_state / "omo-bootstrap" / "install-profile"
 secret_re = re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization|bearer)\s*[:=]\s*[\"']?[^\"',\s}]+")
 
 
@@ -89,8 +91,20 @@ config_files = [
     opencode_dir / "tui.json",
 ]
 
+
+def install_profile():
+    if profile_file.exists():
+        value = profile_file.read_text(errors="replace").strip()
+        if value in {"light", "full"}:
+            return {"value": value, "source": str(profile_file), "managed": True}
+    for path in (opencode_dir / "opencode.json", opencode_dir / "opencode.jsonc"):
+        if path.exists() and '"oh-my-openagent' in path.read_text(errors="replace"):
+            return {"value": "full", "source": str(path), "managed": False}
+    return {"value": "unknown", "source": "", "managed": False}
+
 data = {
     "generated_at": datetime.now(timezone.utc).isoformat(),
+    "install_profile": install_profile(),
     "os": {
         "platform": platform.platform(),
         "uname": list(platform.uname()),
@@ -101,6 +115,7 @@ data = {
         "home": str(home),
         "shell": os.environ.get("SHELL", ""),
         "xdg_config_home": str(xdg_config),
+        "xdg_state_home": str(xdg_state),
         "xdg_cache_home": os.environ.get("XDG_CACHE_HOME", ""),
         "xdg_data_home": os.environ.get("XDG_DATA_HOME", ""),
     },

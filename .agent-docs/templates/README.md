@@ -10,7 +10,8 @@ Rules:
 
 Files:
 - `remote-access.example.jsonc`: local endpoint pseudoconfig shape.
-- `opencode-global.example.jsonc`: delivery OpenCode config template, installed as `opencode.json`.
+- `opencode-global.example.jsonc`: full delivery OpenCode config, installed as `opencode.json`.
+- `opencode-light.example.jsonc`: light delivery OpenCode config without OmO plugin or custom agents.
 - `oh-my-openagent.example.jsonc`: delivery oh-my-openagent config template, installed as `oh-my-openagent.json`.
 - `opencode-agent-stack.md`: global instruction file referenced by the OpenCode delivery config.
 - `install-state.example.json`: private install-state schema example (includes WSL/global_install fields).
@@ -27,3 +28,4 @@ Files:
 | `repair-cache.sh` | Clean OpenCode provider cache (`--ConfirmRepair`) |
 | `cleanup-temp.sh` | Remove old temp files from ignored dirs |
 | `diagnostic.sh` | Sanitized JSON diagnostic for agent troubleshooting |
+| `build-bootstrap-packages.sh` | Synchronize profile variants and rebuild both delivery ZIP files |

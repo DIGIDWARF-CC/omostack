@@ -18,7 +18,7 @@ Rules:
 
 ## 0.5 WSL/Linux Environment
 
-This project targets **Windows host bootstrap -> Ubuntu WSL operations**. The human-facing bootstrap script is `bootstrap-for-human/omo_host_bootstrap.cmd`; agent maintenance scripts are Bash (`.sh`).
+This project targets **Windows host bootstrap -> Ubuntu WSL operations**. Human-facing bootstrap scripts live in `bootstrap-for-human/` (full) and `bootstrap-for-human-light/` (light); agent maintenance scripts are Bash (`.sh`).
 
 Key paths:
 - Config: `~/.config/opencode/` or `$XDG_CONFIG_HOME/opencode/`
@@ -26,7 +26,7 @@ Key paths:
 - Data: `~/.local/share/opencode/` or `$XDG_DATA_HOME/opencode/`
 - Scripts: `.agent-docs/scripts/*.sh` (bash)
 
-Do not add active maintenance `.ps1` scripts under `.agent-docs/scripts/`. The active human bootstrap path is `bootstrap-for-human/omo_host_bootstrap.cmd`; `bootstrap-for-human/omo_bootstrap.sh` is the Ubuntu-side stage.
+Do not add active maintenance `.ps1` scripts under `.agent-docs/scripts/`. Both delivery folders use `omo_host_bootstrap.cmd` with `omo_bootstrap.sh` as the Ubuntu-side stage. Their script pairs must differ only in the default profile.
 
 ## 1. Intent Gate
 

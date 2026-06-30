@@ -7,6 +7,27 @@ DRY_RUN=false
 if [ "${1:-}" = "--dry-run" ]; then DRY_RUN=true; fi
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
+xdg_config="${XDG_CONFIG_HOME:-$HOME/.config}"
+profile_file="${XDG_STATE_HOME:-$HOME/.local/state}/omo-bootstrap/install-profile"
+
+detect_profile() {
+    local value=""
+    if [ -r "$profile_file" ]; then
+        IFS= read -r value < "$profile_file" || true
+        case "$value" in
+            light|full) printf '%s\n' "$value"; return ;;
+        esac
+    fi
+    if grep -Rqs '"oh-my-openagent' \
+        "$xdg_config/opencode/opencode.json" \
+        "$xdg_config/opencode/opencode.jsonc" 2>/dev/null; then
+        printf 'full\n'
+    else
+        printf 'unknown\n'
+    fi
+}
+
+install_profile="$(detect_profile)"
 
 emit() {
     # Emit: {"check":"name","status":"present|missing|unhealthy","detail":"..."}
@@ -16,13 +37,25 @@ emit() {
 cmd_exists() { command -v "$1" &>/dev/null; }
 
 echo "=== Health Check ==="
-[ "$DRY_RUN" = true ] && echo "(dry-run mode)" || true
+if [ "$DRY_RUN" = true ]; then
+    echo "(dry-run mode)"
+fi
 emit "mode" "present" "check-health is non-destructive; --dry-run accepted for operator safety"
+if [ ! -r "$profile_file" ]; then
+    emit "install-profile" "missing" "no valid installer profile marker at $profile_file; inferred $install_profile"
+elif [ "$install_profile" = unknown ]; then
+    emit "install-profile" "missing" "no valid installer profile marker at $profile_file"
+else
+    emit "install-profile" "present" "$install_profile"
+fi
 
 # --- opencode CLI ---
 if cmd_exists opencode; then
-    ver=$(opencode --version 2>&1 | head -1)
-    if [ $? -eq 0 ]; then emit "opencode" "present" "$ver"; else emit "opencode" "unhealthy" "$ver"; fi
+    if ver=$(opencode --version 2>&1 | head -1); then
+        emit "opencode" "present" "$ver"
+    else
+        emit "opencode" "unhealthy" "$ver"
+    fi
 else
     # Try common locations as fallback hint
     if [ -x ~/.opencode/bin/opencode ]; then
@@ -42,8 +75,10 @@ for cmd in node bun; do
     fi
 done
 
-# --- oh-my-openagent doctor access ---
-if cmd_exists bunx; then
+# --- oh-my-openagent doctor access (full profile only) ---
+if [ "$install_profile" = light ]; then
+    emit "oh-my-openagent-doctor" "present" "not required by the light profile"
+elif cmd_exists bunx; then
     emit "oh-my-openagent-doctor" "present" "bunx available; run: oh-my-openagent doctor or bunx oh-my-openagent doctor"
 elif cmd_exists bun; then
     emit "oh-my-openagent-doctor" "present" "bun available; bunx may be provided by bun on this system"
@@ -56,7 +91,6 @@ else
 fi
 
 # --- Path checks (WSL/Linux) ---
-xdg_config="${XDG_CONFIG_HOME:-$HOME/.config}"
 paths=(
     "base-marker:${repo_root}/.my-omo/omostack-base-install-done"
     "private-install-state:${repo_root}/.my-omo/install-state.json"

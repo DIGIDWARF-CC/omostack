@@ -3,7 +3,7 @@
 setlocal EnableExtensions DisableDelayedExpansion
 
 set "MODE=install"
-set "PROFILE=full"
+set "PROFILE=light"
 set "DISTRO=Ubuntu"
 set "TARGET=C:\AI\omostack"
 set "PORT=4096"

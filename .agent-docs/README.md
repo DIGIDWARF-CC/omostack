@@ -1,6 +1,6 @@
 # .agent-docs - Omostack Home Documentation
 
-This directory is the public, tracked knowledge base for the omostack home — an operations base for OpenCode and oh-my-openagent on **WSL/Linux**. Human OOBE starts from Windows with `bootstrap-for-human/omo_host_bootstrap.cmd`; this folder contains the agent-facing stage-2 docs and scripts.
+This directory is the public, tracked knowledge base for the omostack home — an operations base for OpenCode and optional oh-my-openagent orchestration on **WSL/Linux**. Human OOBE starts from Windows with either `bootstrap-for-human/omo_host_bootstrap.cmd` (full) or `bootstrap-for-human-light/omo_host_bootstrap.cmd` (light); this folder contains shared profile-aware stage-2 docs and scripts.
 
 This is not application documentation. It is an operations base for agent-driven maintenance of the local agent environment.
 
@@ -8,7 +8,7 @@ This is not application documentation. It is an operations base for agent-driven
 
 | Need | Open |
 |------|------|
-| **New install / OOBE** | `../OOBE.md` and `../bootstrap-for-human/omo_host_bootstrap.cmd` |
+| **New install / OOBE** | `../OOBE.md`, then choose `../bootstrap-for-human/` or `../bootstrap-for-human-light/` |
 | New agent orientation | `self-bootstrap-checklist.md` |
 | Main maintenance runbook | `setup-directives.md` |
 | Remote-access policy | `agent-remote-access.md` |

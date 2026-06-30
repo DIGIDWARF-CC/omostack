@@ -14,8 +14,6 @@ while [ $# -gt 0 ]; do
 done
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
-cutoff=$(date -d "-${OLDER_THAN} days" +%s 2>/dev/null || date -v-${OLDER_THAN}d +%s 2>/dev/null)
-
 targets=(
     "${repo_root}/.my-omo/temp"
     "${repo_root}/.omo/evidence"
@@ -24,7 +22,7 @@ targets=(
 for target in "${targets[@]}"; do
     [ ! -d "$target" ] && continue
 
-    find "$target" -type f -mtime +${OLDER_THAN} 2>/dev/null | while read -r file; do
+    find "$target" -type f -mtime +"${OLDER_THAN}" 2>/dev/null | while read -r file; do
         if [ "$DRY_RUN" = true ]; then
             echo "[dry-run] would remove: $file"
         else
