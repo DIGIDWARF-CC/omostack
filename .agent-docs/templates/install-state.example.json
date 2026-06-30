@@ -7,7 +7,7 @@
     "kernel": "5.15.0-wsl"
   },
   "machine": "example-machine",
-  "omostack_home": "/mnt/s/FastNeuros/omo",
+  "omostack_home": "/mnt/c/AI/omostack",
   "base_marker": ".my-omo/omostack-base-install-done",
   "global_install": true,
   "tools": {

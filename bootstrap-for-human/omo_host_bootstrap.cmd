@@ -18,6 +18,9 @@ set "NETWORK_MODE=best-effort"
 set "WSL_SHUTDOWN_NEEDED=0"
 set "REBOOT_REQUIRED=0"
 set "STATUS_TMP=%TEMP%\omo-bootstrap-status.json"
+set "KEEPALIVE_TASK=OmO OpenCode WSL Keepalive"
+set "KEEPALIVE_SCRIPT=%LOCALAPPDATA%\OmOHostBootstrap\start-opencode-wsl.cmd"
+set "KEEPALIVE_LAUNCHER=%LOCALAPPDATA%\OmOHostBootstrap\start-opencode-wsl-hidden.vbs"
 set "SHOW_HELP=0"
 
 call :main %*
@@ -68,6 +71,9 @@ call :run_ubuntu_stage
 if errorlevel 1 exit /b 1
 
 call :configure_windows_access
+if errorlevel 1 exit /b 1
+
+call :configure_wsl_keepalive
 if errorlevel 1 exit /b 1
 
 call :log "OmO host bootstrap complete."
@@ -169,7 +175,7 @@ call :log "Windows version: %WIN_VERSION% (build %WIN_BUILD%); WSL networking mo
 exit /b 0
 
 :ensure_host_prereqs
-for %%T in (cscript.exe dism.exe reg.exe wsl.exe netsh.exe curl.exe) do (
+for %%T in (cscript.exe wscript.exe dism.exe reg.exe wsl.exe netsh.exe curl.exe schtasks.exe) do (
     where %%T >nul 2>nul
     if errorlevel 1 (
         echo ERROR: %%T is required but was not found in PATH.
@@ -409,6 +415,38 @@ if errorlevel 1 (
 )
 exit /b 0
 
+:configure_wsl_keepalive
+if "%DRY_RUN%"=="1" (
+    call :log "[dry-run] would write %KEEPALIVE_SCRIPT% and %KEEPALIVE_LAUNCHER%, then create the %KEEPALIVE_TASK% Scheduled Task."
+    exit /b 0
+)
+
+if not exist "%LOCALAPPDATA%\OmOHostBootstrap" mkdir "%LOCALAPPDATA%\OmOHostBootstrap" >nul 2>nul
+call :log "Writing OpenCode WSL keepalive scripts."
+cscript.exe //nologo //E:JScript "%~f0" write-keepalive "%KEEPALIVE_SCRIPT%" "%DISTRO%" "%PORT%"
+if errorlevel 1 exit /b 1
+cscript.exe //nologo //E:JScript "%~f0" write-keepalive-launcher "%KEEPALIVE_LAUNCHER%"
+if errorlevel 1 exit /b 1
+
+schtasks.exe /Query /TN "%KEEPALIVE_TASK%" >nul 2>nul
+if not errorlevel 1 (
+    call :log "Stopping the previous OpenCode WSL keepalive task instance."
+    schtasks.exe /End /TN "%KEEPALIVE_TASK%" >>"%LOG_FILE%" 2>&1
+)
+
+call :log "Creating Windows Scheduled Task: %KEEPALIVE_TASK%."
+cscript.exe //nologo //E:JScript "%~f0" create-keepalive-task "%KEEPALIVE_TASK%" "%KEEPALIVE_LAUNCHER%"
+if errorlevel 1 exit /b 1
+
+schtasks.exe /Run /TN "%KEEPALIVE_TASK%" >>"%LOG_FILE%" 2>&1
+if errorlevel 1 (
+    echo ERROR: failed to start Scheduled Task "%KEEPALIVE_TASK%".
+    echo See log: %LOG_FILE%
+    exit /b 1
+)
+call :log "OpenCode WSL keepalive task started."
+exit /b 0
+
 :status
 call :log "Mode: status"
 call :log "Admin: checking"
@@ -431,6 +469,9 @@ wsl.exe -l -v
 echo.
 echo === portproxy ===
 netsh.exe interface portproxy show all
+echo.
+echo === OmO OpenCode WSL keepalive task ===
+schtasks.exe /Query /TN "%KEEPALIVE_TASK%" /V /FO LIST
 
 set "STAGE_WIN=%ROOT_DIR%omo_bootstrap.sh"
 if exist "%STAGE_WIN%" (
@@ -615,6 +656,109 @@ function isIPv4(value) {
     WScript.Quit(0);
 }
 
+function pad2(n) {
+    return n < 10 ? "0" + n : String(n);
+}
+
+function localTaskDate(date) {
+    return date.getFullYear() + "-"
+        + pad2(date.getMonth() + 1) + "-"
+        + pad2(date.getDate()) + "T"
+        + pad2(date.getHours()) + ":"
+        + pad2(date.getMinutes()) + ":"
+        + pad2(date.getSeconds());
+}
+
+function safeSet(object, property, value) {
+    try {
+        object[property] = value;
+    } catch (e) {
+    }
+}
+
+function writeKeepalive(path, distro, port) {
+    var lines = [
+        "@echo off",
+        "setlocal EnableExtensions DisableDelayedExpansion",
+        "set \"DISTRO=" + String(distro) + "\"",
+        "set \"PORT=" + String(port) + "\"",
+        "set \"LOG=%LOCALAPPDATA%\\OmOHostBootstrap\\opencode-wsl-keepalive.log\"",
+        "if not exist \"%LOCALAPPDATA%\\OmOHostBootstrap\" mkdir \"%LOCALAPPDATA%\\OmOHostBootstrap\" >nul 2>nul",
+        "echo %DATE% %TIME% starting OmO OpenCode WSL keepalive>>\"%LOG%\"",
+        "set \"WSL_IP=\"",
+        "for /f \"tokens=1\" %%I in ('wsl.exe -d %DISTRO% -u root -- hostname -I 2^>nul') do if not defined WSL_IP set \"WSL_IP=%%I\"",
+        "if defined WSL_IP (",
+        "  netsh.exe interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=%PORT% >>\"%LOG%\" 2>&1",
+        "  netsh.exe interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=%PORT% connectaddress=%WSL_IP% connectport=%PORT% >>\"%LOG%\" 2>&1",
+        ") else (",
+        "  echo %DATE% %TIME% WARN could not determine WSL IP>>\"%LOG%\"",
+        ")",
+        "echo %DATE% %TIME% entering long-running WSL keepalive>>\"%LOG%\"",
+        "wsl.exe -d %DISTRO% -u root -- bash -lc \"systemctl start opencode-serve.service 2>/dev/null || (mkdir -p /root/.local/state/omo-bootstrap; pgrep -af 'opencode serve.*--port %PORT%' >/dev/null || nohup env HOME=/root XDG_CONFIG_HOME=/root/.config XDG_STATE_HOME=/root/.local/state /usr/local/bin/opencode serve --hostname 0.0.0.0 --port %PORT% >/root/.local/state/omo-bootstrap/opencode-serve.log 2>&1 &); exec sleep infinity\" >>\"%LOG%\" 2>&1",
+        "set \"KEEPALIVE_EXIT=%ERRORLEVEL%\"",
+        "echo %DATE% %TIME% keepalive exited with code %KEEPALIVE_EXIT%>>\"%LOG%\"",
+        "exit /b %KEEPALIVE_EXIT%"
+    ];
+    writeFile(path, lines.join("\r\n") + "\r\n");
+}
+
+function writeKeepaliveLauncher(path) {
+    var lines = [
+        "Option Explicit",
+        "",
+        "Dim shell, fileSystem, scriptDir, command, exitCode",
+        "Set shell = CreateObject(\"WScript.Shell\")",
+        "Set fileSystem = CreateObject(\"Scripting.FileSystemObject\")",
+        "scriptDir = fileSystem.GetParentFolderName(WScript.ScriptFullName)",
+        "command = \"cmd.exe /d /c \" & Chr(34) & Chr(34) & scriptDir & \"\\start-opencode-wsl.cmd\" & Chr(34) & Chr(34)",
+        "exitCode = shell.Run(command, 0, True)",
+        "WScript.Quit exitCode"
+    ];
+    writeFile(path, lines.join("\r\n") + "\r\n");
+}
+
+function createKeepaliveTask(taskName, launcherPath) {
+    var service = new ActiveXObject("Schedule.Service");
+    service.Connect();
+
+    var root = service.GetFolder("\\");
+    var task = service.NewTask(0);
+    var user = shell.ExpandEnvironmentStrings("%USERDOMAIN%\\%USERNAME%");
+
+    task.RegistrationInfo.Description = "Keeps Ubuntu WSL OpenCode service and Windows loopback portproxy alive for OmO.";
+    task.Principal.UserId = user;
+    task.Principal.LogonType = 3; // TASK_LOGON_INTERACTIVE_TOKEN
+    task.Principal.RunLevel = 1; // TASK_RUNLEVEL_HIGHEST
+
+    task.Settings.Enabled = true;
+    task.Settings.AllowDemandStart = true;
+    task.Settings.StartWhenAvailable = true;
+    task.Settings.DisallowStartIfOnBatteries = false;
+    task.Settings.StopIfGoingOnBatteries = false;
+    task.Settings.ExecutionTimeLimit = "PT0S";
+    safeSet(task.Settings, "MultipleInstances", 2); // TASK_INSTANCES_IGNORE_NEW
+    safeSet(task.Settings, "RestartCount", 3);
+    safeSet(task.Settings, "RestartInterval", "PT1M");
+
+    var logonTrigger = task.Triggers.Create(9); // TASK_TRIGGER_LOGON
+    logonTrigger.Enabled = true;
+    logonTrigger.UserId = user;
+
+    var timeTrigger = task.Triggers.Create(1); // TASK_TRIGGER_TIME
+    timeTrigger.Enabled = true;
+    timeTrigger.StartBoundary = localTaskDate(new Date(new Date().getTime() + 60000));
+    timeTrigger.Repetition.Interval = "PT5M";
+    timeTrigger.Repetition.Duration = "P3650D";
+    timeTrigger.Repetition.StopAtDurationEnd = false;
+
+    var action = task.Actions.Create(0); // TASK_ACTION_EXEC
+    action.Path = shell.ExpandEnvironmentStrings("%SystemRoot%\\System32\\wscript.exe");
+    action.Arguments = "//B //NoLogo \"" + launcherPath + "\"";
+    action.WorkingDirectory = fso.GetParentFolderName(launcherPath);
+
+    root.RegisterTaskDefinition(taskName, task, 6, user, null, 3); // TASK_CREATE_OR_UPDATE + TASK_LOGON_INTERACTIVE_TOKEN
+}
+
 if (args.length < 1) WScript.Quit(2);
 var command = String(args.Item(0)).toLowerCase();
 if (command === "windows-version") {
@@ -629,6 +773,12 @@ if (command === "windows-version") {
     jsonField(args.Item(1), args.Item(2));
 } else if (command === "is-ipv4") {
     isIPv4(args.Item(1));
+} else if (command === "write-keepalive") {
+    writeKeepalive(args.Item(1), args.Item(2), args.Item(3));
+} else if (command === "write-keepalive-launcher") {
+    writeKeepaliveLauncher(args.Item(1));
+} else if (command === "create-keepalive-task") {
+    createKeepaliveTask(args.Item(1), args.Item(2));
 } else {
     WScript.Echo("Unknown helper command: " + command);
     WScript.Quit(2);

@@ -35,7 +35,7 @@ bootstrap-for-human\omo_host_bootstrap.cmd /mode repair /target C:\AI\omostack /
 ## What The Host Bootstrapper Does
 
 1. Requires administrator rights for real `install` and `repair`; `/dry-run` and `status` do not mutate the host.
-2. Uses only `cmd.exe`, `cscript.exe` JScript, `dism.exe`, `reg.exe`, `wsl.exe`, `netsh.exe`, and `curl.exe`; it does not invoke PowerShell.
+2. Uses only `cmd.exe`, Windows Script Host (`cscript.exe`/`wscript.exe`), `dism.exe`, `reg.exe`, `wsl.exe`, `netsh.exe`, and `curl.exe`; it does not invoke PowerShell.
 3. Enables WSL optional features and sets WSL2 as the default version.
 4. Installs or reuses generic `Ubuntu`, then sets it as the default WSL distro.
 5. Sets Ubuntu Insights registry default to opt-out.
@@ -44,6 +44,7 @@ bootstrap-for-human\omo_host_bootstrap.cmd /mode repair /target C:\AI\omostack /
    - Windows 10 and older builds: `localhostForwarding=true`.
 7. Runs the Ubuntu stage through `wsl.exe -d Ubuntu -u root -- bash ...`.
 8. Reads Ubuntu machine-readable status JSON, then configures `127.0.0.1:4096` portproxy to the reported WSL IP.
+9. Registers a hidden per-user Scheduled Task that keeps Ubuntu alive, refreshes the loopback portproxy after WSL IP changes, and starts `opencode-serve.service`.
 
 The host bootstrapper does not create a broad inbound firewall rule.
 
@@ -66,7 +67,7 @@ into the Ubuntu stage or creating a bogus portproxy.
 After the human bootstrap succeeds, an agent inside WSL can run:
 
 ```bash
-cd /mnt/s/FastNeuros/omo
+cd /mnt/c/AI/omostack
 .agent-docs/scripts/OOBE-setup.sh --auto
 .agent-docs/scripts/check-scaffold.sh --all
 ```

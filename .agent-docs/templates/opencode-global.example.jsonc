@@ -1,17 +1,180 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "example-provider/example-model",
+  "compaction": {
+    "auto": false
+  },
+  "model": "opencode/deepseek-v4-flash-free",
+  "small_model": "opencode/north-mini-code-free",
   "plugin": [
-    "oh-my-openagent"
+    "oh-my-openagent@4.11.1"
   ],
-  "provider": {
-    "example-provider": {
-      "npm": "@ai-sdk/example",
-      "models": {
-        "example-model": {
-          "name": "Example Model"
-        }
+  "instructions": [
+    "opencode-agent-stack.md"
+  ],
+  "lsp": {
+    "typescript": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "typescript@5.9.3",
+        "--package",
+        "typescript-language-server@5.3.0",
+        "typescript-language-server",
+        "--stdio"
+      ],
+      "extensions": [
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".mts",
+        ".cts"
+      ]
+    },
+    "html": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "vscode-langservers-extracted@4.10.0",
+        "vscode-html-language-server",
+        "--stdio"
+      ],
+      "extensions": [
+        ".html",
+        ".htm",
+        ".htmldjango",
+        ".handlebars"
+      ]
+    },
+    "css": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "vscode-langservers-extracted@4.10.0",
+        "vscode-css-language-server",
+        "--stdio"
+      ],
+      "extensions": [
+        ".css",
+        ".scss",
+        ".less"
+      ]
+    },
+    "json": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "vscode-langservers-extracted@4.10.0",
+        "vscode-json-language-server",
+        "--stdio"
+      ],
+      "extensions": [
+        ".json",
+        ".jsonc"
+      ]
+    },
+    "python": {
+      "command": [
+        "npx",
+        "-y",
+        "--package",
+        "pyright@1.1.411",
+        "pyright-langserver",
+        "--stdio"
+      ],
+      "extensions": [
+        ".py",
+        ".pyi"
+      ]
+    },
+    "php": {
+      "command": [
+        "npx",
+        "-y",
+        "intelephense@1.18.5",
+        "--stdio"
+      ],
+      "extensions": [
+        ".php",
+        ".phtml",
+        ".module",
+        ".inc"
+      ]
+    }
+  },
+  "agent": {
+    "title": {
+      "disable": true
+    },
+    "wsl-interop": {
+      "description": "Handle WSL/Linux to Windows interop, cross-compilation, and safe Windows binary checks.",
+      "mode": "subagent",
+      "prompt": "Help with WSL/Linux to Windows interop. Windows drives are available through /mnt/c/ and other mounted drive letters. Windows executables may need explicit /mnt/c/... paths because Windows PATH is not appended inside WSL. Check command availability, the target platform, and the target architecture before changing build logic; do not assume cross-compilers or Wine are installed.",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": "allow",
+        "external_directory": "allow"
+      }
+    },
+    "powershell-agent": {
+      "description": "Write and review Windows PowerShell 5 and PowerShell 7 scripts with PSScriptAnalyzer awareness.",
+      "mode": "subagent",
+      "prompt": "Write and review PowerShell scripts while accounting for Windows PowerShell 5 and PowerShell 7 differences. Windows PowerShell can be invoked through /mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe; use pwsh only when it is installed. Check $PSVersionTable.PSVersion and PSScriptAnalyzer availability before relying on version-specific behavior.",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "edit": "allow",
+        "bash": "allow",
+        "external_directory": "allow"
+      }
+    },
+    "build": {
+      "mode": "primary",
+      "disable": false
+    },
+    "plan": {
+      "mode": "primary",
+      "disable": false
+    },
+    "general": {
+      "mode": "primary",
+      "disable": false
+    }
+  },
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp@0.0.75",
+        "--headless",
+        "--browser",
+        "chrome",
+        "--no-sandbox",
+        "--isolated",
+        "--viewport-size",
+        "800x600"
+      ],
+      "enabled": true,
+      "timeout": 360000,
+      "environment": {
+        "TMPDIR": "/tmp",
+        "TMP": "/tmp",
+        "TEMP": "/tmp",
+        "XDG_RUNTIME_DIR": "/tmp/opencode-runtime-root"
       }
     }
-  }
+  },
+  "shell": "/bin/bash"
 }

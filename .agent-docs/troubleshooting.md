@@ -48,7 +48,7 @@ WSL may have git installed for Windows but not exposed in the Linux PATH.
 
 | Symptom | Likely State | First Check | Repair Path |
 |---------|--------------|-------------|-------------|
-| Binary not found in PATH | missing | `check-health.sh --dry-run` | Global install: `npm install -g oh-my-openagent` |
+| Binary not found in PATH | missing | `check-health.sh --dry-run` | Global install: `npm install -g oh-my-openagent@4.11.1` |
 | Legacy package warning | unhealthy config | `check-config.sh --dry-run` | Prefer `oh-my-openagent`; remove legacy collision after backup |
 | Both `oh-my-opencode` and `oh-my-openagent` config files exist | unhealthy config | `check-config.sh --dry-run` | Choose current name and archive legacy file |
 | Provider-specific agent cannot start | unhealthy auth/model | `provider-auth.md` checks | Fix provider auth or model override |
@@ -60,7 +60,7 @@ mkdir -p ~/.config/opencode/
 printf '{\n  "plugin": ["oh-my-openagent/tui"]\n}\n' > ~/.config/opencode/tui.json
 ```
 
-Also verify opencode.jsonc has `"plugin": ["oh-my-openagent"]`.
+Also verify the active `opencode.json` (or compatible JSONC) has `"plugin": ["oh-my-openagent@4.11.1"]`.
 
 ### Config collision (legacy vs current)
 
@@ -108,14 +108,14 @@ Then restart opencode.
 
 ### Model resolution fails for custom provider
 
-Custom providers (like LM Studio) need explicit model configuration in `opencode.jsonc`.
+Custom providers need explicit model configuration in `opencode.json` (or compatible JSONC).
 
 **Check:**
-1. Verify the server is running: `curl http://localhost:1235/v1/models` (or your LM Studio URL)
+1. Verify the provider endpoint is reachable.
 2. Check model ID matches exactly what the provider reports
 3. Run `opencode auth list` and `opencode --print-logs`
 
-**Fix:** Update `~/.config/opencode/opencode.jsonc` with correct baseURL, apiKey, and model ID. See `provider-auth.md` for details.
+**Fix:** Update the active OpenCode config with the correct base URL, API key, and model ID. See `provider-auth.md` for details.
 
 ## Diagnostic Workflow (for agents)
 

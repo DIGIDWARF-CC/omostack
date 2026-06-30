@@ -25,6 +25,7 @@ includes=(
     "$repo_root/.my-omo"
     "$xdg_config/opencode/opencode.json"
     "$xdg_config/opencode/opencode.jsonc"
+    "$xdg_config/opencode/opencode-agent-stack.md"
     "$xdg_config/opencode/oh-my-openagent.json"
     "$xdg_config/opencode/oh-my-openagent.jsonc"
     "$xdg_config/opencode/tui.json"

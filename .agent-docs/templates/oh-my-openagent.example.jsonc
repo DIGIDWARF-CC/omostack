@@ -1,19 +1,169 @@
 {
-  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/dev/assets/oh-my-opencode.schema.json",
+  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-openagent/v4.11.1/assets/oh-my-opencode.schema.json",
+  "git_master": {
+    "commit_footer": true,
+    "include_co_authored_by": true,
+    "git_env_prefix": "GIT_MASTER=1"
+  },
+  "model_fallback": true,
+  "runtime_fallback": {
+    "enabled": false
+  },
+  "babysitting": {
+    "timeout_ms": 1800000
+  },
+  "background_task": {
+    "sessionGoneTimeoutMs": 1800000,
+    "messageStalenessTimeoutMs": 1800000,
+    "taskTtlMs": 1800000,
+    "syncPollTimeoutMs": 1800000,
+    "taskCleanupDelayMs": 1800000,
+    "defaultConcurrency": 2,
+    "modelConcurrency": {
+      "opencode/deepseek-v4-flash-free": 2
+    },
+    "staleTimeoutMs": 1800000
+  },
   "agents": {
+    "OpenCode-Builder": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
     "sisyphus": {
-      "model": "example-provider/example-reasoning-model"
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "hephaestus": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "prometheus": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "atlas": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "oracle": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "librarian": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "explore": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "multimodal-looker": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "metis": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "momus": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "sisyphus-junior": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
     }
   },
   "categories": {
+    "visual-engineering": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "artistry": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "deep": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
     "quick": {
-      "model": "example-provider/example-fast-model"
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "unspecified-low": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
+    },
+    "unspecified-high": {
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
     },
     "writing": {
-      "model": "example-provider/example-writing-model"
+      "model": "opencode/deepseek-v4-flash-free",
+      "fallback_models": [
+        "opencode/north-mini-code-free",
+        "opencode/mimo-v2.5-free"
+      ]
     }
   },
-  "background_task": {
-    "enabled": true
+  "sisyphus_agent": {
+    "default_builder_enabled": true,
+    "planner_enabled": true,
+    "replace_plan": false
   }
 }

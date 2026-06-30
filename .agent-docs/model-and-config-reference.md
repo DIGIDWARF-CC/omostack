@@ -3,7 +3,8 @@
 ## OpenCode Config Locations
 
 **Primary (XDG-compliant):**
-- `~/.config/opencode/opencode.json` or `.jsonc` ($XDG_CONFIG_HOME/opencode/)
+- `~/.config/opencode/opencode.json` ($XDG_CONFIG_HOME/opencode/)
+- `~/.config/opencode/opencode.jsonc` is supported for existing installations, but the delivery template uses `opencode.json`
 - `~/.cache/opencode/` — provider cache ($XDG_CACHE_HOME/opencode/)
 
 Legacy Windows paths (`%APPDATA%\opencode\`) are not used on WSL/Linux.
@@ -23,10 +24,10 @@ If legacy and current files exist in the same config directory, treat this as an
 
 ## Plugin Naming
 
-OpenCode config (`opencode.jsonc`) must include:
+OpenCode config (`opencode.json`, or compatible `opencode.jsonc`) must include:
 ```json
 {
-  "plugin": ["oh-my-openagent"]
+  "plugin": ["oh-my-openagent@4.11.1"]
 }
 ```
 
@@ -44,7 +45,7 @@ Legacy `oh-my-opencode` entries should be migrated only after config backup.
 **oh-my-openagent MUST be globally installed for full functionality:**
 
 ```bash
-npm install -g oh-my-openagent
+npm install -g oh-my-openagent@4.11.1
 npm install -g @code-yeongyu/comment-checker
 ```
 
@@ -64,31 +65,3 @@ Keep model overrides explicit and documented. If an agent behaves badly after mo
 3. Check config collision (legacy vs current names).
 4. Verify the model ID matches what the provider actually reports (check `/v1/models` endpoint for custom providers).
 5. Revert to the previous backed-up config if needed.
-
-## Model Resolution for Custom Providers (e.g., LM Studio)
-
-Custom providers use OpenAI-compatible API format:
-```jsonc
-{
-  "provider": {
-    "lmstudio": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "LM Studio",
-      "options": {
-        "baseURL": "http://<host>:1235/v1",
-        "apiKey": "lm-studio"
-      },
-      "models": {
-        "<model-id>": {
-          "name": "Display Name",
-          "family": "qwen",
-          "limit": { "context": 131072, "output": 32768 }
-        }
-      }
-    }
-  },
-  "model": "lmstudio/<model-id>"
-}
-```
-
-The `model` field at the top level must match `<provider>/<model-id>` format. Verify with: `curl http://<host>:1235/v1/models`

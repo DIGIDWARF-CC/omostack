@@ -51,7 +51,7 @@ else
     if cmd_exists oh-my-openagent; then
         emit "oh-my-openagent-doctor" "present" "oh-my-openagent binary found in PATH (global install)"
     else
-        emit "oh-my-openagent-doctor" "missing" "bun/bunx and oh-my-openagent not found — install globally: npm install -g oh-my-openagent"
+        emit "oh-my-openagent-doctor" "missing" "bun/bunx and oh-my-openagent not found — install globally: npm install -g oh-my-openagent@4.11.1"
     fi
 fi
 
@@ -61,8 +61,6 @@ paths=(
     "base-marker:${repo_root}/.my-omo/omostack-base-install-done"
     "private-install-state:${repo_root}/.my-omo/install-state.json"
     "private-remote-access:${repo_root}/.my-omo/remote-access"
-    "opencode-user-config:${xdg_config}/opencode/opencode.json"
-    "opencode-user-config-jsonc:${xdg_config}/opencode/opencode.jsonc"
     "opencode-cache:$HOME/.cache/opencode"
 )
 
@@ -75,6 +73,14 @@ for entry in "${paths[@]}"; do
         emit "$name" "missing" "$path"
     fi
 done
+
+if [ -f "${xdg_config}/opencode/opencode.json" ]; then
+    emit "opencode-user-config" "present" "${xdg_config}/opencode/opencode.json"
+elif [ -f "${xdg_config}/opencode/opencode.jsonc" ]; then
+    emit "opencode-user-config" "present" "${xdg_config}/opencode/opencode.jsonc (compatible JSONC)"
+else
+    emit "opencode-user-config" "missing" "${xdg_config}/opencode/opencode.json"
+fi
 
 echo ""
 echo "=== End Health Check ==="

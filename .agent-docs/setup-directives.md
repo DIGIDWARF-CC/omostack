@@ -88,7 +88,7 @@ See `provider-auth.md` for provider-specific missing/unhealthy interpretation.
 **oh-my-openagent MUST be globally installed via npm for full functionality:**
 
 ```bash
-npm install -g oh-my-openagent
+npm install -g oh-my-openagent@4.11.1
 npm install -g @code-yeongyu/comment-checker
 ```
 

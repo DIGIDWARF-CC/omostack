@@ -10,8 +10,9 @@ Rules:
 
 Files:
 - `remote-access.example.jsonc`: local endpoint pseudoconfig shape.
-- `opencode-global.example.jsonc`: global OpenCode config shape.
-- `oh-my-openagent.example.jsonc`: oh-my-openagent config shape.
+- `opencode-global.example.jsonc`: delivery OpenCode config template, installed as `opencode.json`.
+- `oh-my-openagent.example.jsonc`: delivery oh-my-openagent config template, installed as `oh-my-openagent.json`.
+- `opencode-agent-stack.md`: global instruction file referenced by the OpenCode delivery config.
 - `install-state.example.json`: private install-state schema example (includes WSL/global_install fields).
 
 ## Scripts Directory

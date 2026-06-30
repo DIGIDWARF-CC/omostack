@@ -6,6 +6,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 failures=()
 
+git_safe() {
+    git -c "safe.directory=${repo_root}" -C "$repo_root" "$@"
+}
+
 assert_file() {
     if [ -f "${repo_root}/$1" ]; then echo "PASS file exists: $1"; else failures+=("file missing: $1"); fi
 }
@@ -37,6 +41,7 @@ run_templates() {
              ".agent-docs/templates/remote-access.example.jsonc" \
              ".agent-docs/templates/opencode-global.example.jsonc" \
              ".agent-docs/templates/oh-my-openagent.example.jsonc" \
+             ".agent-docs/templates/opencode-agent-stack.md" \
              ".agent-docs/templates/install-state.example.json"; do
         assert_file "$f"
     done
@@ -47,7 +52,11 @@ run_script_safety() {
     assert_file "bootstrap-for-human/omo_host_bootstrap.cmd"
     assert_file "bootstrap-for-human/omo_bootstrap.sh"
     assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "cscript.exe"
+    assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "wscript.exe"
+    assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "start-opencode-wsl-hidden.vbs"
+    assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "ExecutionTimeLimit = \"PT0S\""
     assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "netsh.exe interface portproxy"
+    assert_contains "bootstrap-for-human/omo_bootstrap.sh" "oh-my-openagent.example.jsonc"
     for f in check-health.sh check-config.sh backup-omostack.sh cleanup-temp.sh \
              repair-cache.sh check-scaffold.sh OOBE-setup.sh diagnostic.sh; do
         assert_file ".agent-docs/scripts/$f"
@@ -57,6 +66,29 @@ run_script_safety() {
     else
         failures+=("omo_bootstrap.sh failed Bash parse check")
     fi
+    local jscript_tmp
+    jscript_tmp="$(mktemp --suffix=.js)"
+    awk '{
+        sub(/\r$/, "")
+        if (found) print
+        if ($0 == "*/") found = 1
+    }' "${repo_root}/bootstrap-for-human/omo_host_bootstrap.cmd" > "$jscript_tmp"
+    if command -v node >/dev/null 2>&1 && node --check "$jscript_tmp" >/dev/null; then
+        echo "PASS embedded JScript parses with Node"
+    elif ! command -v node >/dev/null 2>&1; then
+        echo "SKIP embedded JScript parse check: node is unavailable"
+    else
+        failures+=("embedded JScript in omo_host_bootstrap.cmd failed parse check")
+    fi
+    rm -f "$jscript_tmp"
+    for template in opencode-global.example.jsonc oh-my-openagent.example.jsonc; do
+        if python3 -m json.tool "${repo_root}/.agent-docs/templates/$template" >/dev/null; then
+            echo "PASS $template parses as JSON"
+        else
+            failures+=("$template failed JSON parse check")
+        fi
+    done
+    assert_not_contains ".agent-docs/templates/oh-my-openagent.example.jsonc" "lmstudio"
     assert_contains ".agent-docs/scripts/repair-cache.sh" "ConfirmRepair"
     if find "${repo_root}/.agent-docs/scripts" -maxdepth 1 -name '*.ps1' | grep -q .; then
         failures+=("legacy .ps1 scripts found under .agent-docs/scripts")
@@ -116,9 +148,9 @@ run_troubleshooting() {
 run_gitignore() {
     if command -v git &>/dev/null; then
         local ignored=true tracked=true
-        git -C "$repo_root" check-ignore -q -- ".my-omo/remote-access/example.local.jsonc" 2>/dev/null || ignored=false
-        git -C "$repo_root" check-ignore -q -- ".omo/boulder.json" 2>/dev/null || ignored=false
-        git -C "$repo_root" ls-files -- ".agent-docs/templates/README.md" &>/dev/null && tracked=true || tracked=false
+        git_safe check-ignore -q -- ".my-omo/remote-access/example.local.jsonc" 2>/dev/null || ignored=false
+        git_safe check-ignore -q -- ".omo/boulder.json" 2>/dev/null || ignored=false
+        git_safe ls-files -- ".agent-docs/templates/README.md" &>/dev/null && tracked=true || tracked=false
         if $ignored; then echo "PASS .my-omo private paths are ignored"; else failures+=(".my-omo not properly ignored"); fi
         if $tracked; then echo "PASS templates are tracked by git"; else failures+=("templates not tracked by git"); fi
     else
@@ -135,7 +167,7 @@ run_links() {
                  "scripts/" "templates/"; do
         assert_contains ".agent-docs/README.md" "$token"
     done
-    if rg -n --glob '!check-scaffold.sh' "config-audit.sh|Windows \\(pwsh fallback\\)|daemon-reload \\+ restart|создаётся автоматически" \
+    if rg -n --glob '!check-scaffold.sh' "config-audit.sh|Windows \\(pwsh fallback\\)|daemon-reload \\+ restart|создаётся автоматически|/mnt/s/FastNeuros/omo" \
         "${repo_root}/OOBE.md" "${repo_root}/.agent-docs" >/tmp/omo-forbidden-docs.log 2>/dev/null; then
         failures+=("active docs contain forbidden legacy/OOBE promises; see /tmp/omo-forbidden-docs.log")
     else

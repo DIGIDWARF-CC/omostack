@@ -69,6 +69,16 @@ fi
 opencode_json="${config_root}/opencode.json"
 opencode_jsonc="${config_root}/opencode.jsonc"
 
+if [ -f "$opencode_json" ] && [ -f "$opencode_jsonc" ]; then
+    emit "opencode-config-collision" "unhealthy" "opencode.json and opencode.jsonc both exist — archive opencode.jsonc and keep opencode.json"
+elif [ -f "$opencode_json" ]; then
+    emit "opencode-config-collision" "present" "canonical opencode.json is active"
+elif [ -f "$opencode_jsonc" ]; then
+    emit "opencode-config-collision" "present" "compatible opencode.jsonc is active"
+else
+    emit "opencode-config-collision" "missing" "no OpenCode config found"
+fi
+
 plugin_found=false
 if [ -f "$opencode_json" ]; then
     if grep -q '"oh-my-opencode"' "$opencode_json"; then

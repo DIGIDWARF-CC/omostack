@@ -51,6 +51,19 @@ copy_if_missing() {
         cp "$src" "$dest"
     fi
 }
+archive_file() {
+    local path="$1"
+    local stamp
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    if [ ! -f "$path" ]; then
+        return
+    fi
+    if [ "$DRY_RUN" = true ]; then
+        log "[dry-run] archive $path -> $path.disabled-by-omo-$stamp"
+    else
+        mv "$path" "$path.disabled-by-omo-$stamp"
+    fi
+}
 tool_version() {
     local tool="$1"
     if command -v "$tool" >/dev/null 2>&1; then
@@ -89,7 +102,7 @@ if command -v npm >/dev/null 2>&1; then
     if command -v oh-my-openagent >/dev/null 2>&1; then
         log "  present: oh-my-openagent"
     elif [ "$AUTO" = true ]; then
-        run_or_echo npm install -g oh-my-openagent
+        run_or_echo npm install -g oh-my-openagent@4.11.1
     else
         log "  missing: oh-my-openagent; run with --auto to install through npm"
     fi
@@ -112,16 +125,30 @@ else
     mkdir -p "$opencode_config"
 fi
 
-if [ ! -f "$opencode_config/opencode.jsonc" ] && [ ! -f "$opencode_config/opencode.json" ]; then
-    copy_if_missing "$repo_root/.agent-docs/templates/opencode-global.example.jsonc" "$opencode_config/opencode.jsonc"
-else
+if [ -f "$opencode_config/opencode.json" ] && [ -f "$opencode_config/opencode.jsonc" ]; then
+    archive_file "$opencode_config/opencode.jsonc"
+fi
+
+if [ ! -f "$opencode_config/opencode.json" ] && [ ! -f "$opencode_config/opencode.jsonc" ]; then
+    copy_if_missing "$repo_root/.agent-docs/templates/opencode-global.example.jsonc" "$opencode_config/opencode.json"
+elif [ -f "$opencode_config/opencode.json" ]; then
     log "  present: OpenCode config"
     if ! grep -Rqs '"oh-my-openagent"' "$opencode_config"/opencode.json "$opencode_config"/opencode.jsonc 2>/dev/null; then
         log "  warning: config does not mention oh-my-openagent; add it manually if this stack needs the plugin"
     fi
+else
+    log "  present: OpenCode JSONC config"
 fi
 
-copy_if_missing "$repo_root/.agent-docs/templates/oh-my-openagent.example.jsonc" "$opencode_config/oh-my-openagent.json"
+if [ -f "$opencode_config/oh-my-openagent.json" ] && [ -f "$opencode_config/oh-my-openagent.jsonc" ]; then
+    archive_file "$opencode_config/oh-my-openagent.jsonc"
+fi
+if [ ! -f "$opencode_config/oh-my-openagent.json" ] && [ ! -f "$opencode_config/oh-my-openagent.jsonc" ]; then
+    copy_if_missing "$repo_root/.agent-docs/templates/oh-my-openagent.example.jsonc" "$opencode_config/oh-my-openagent.json"
+else
+    log "  present: Oh My OpenAgent config"
+fi
+copy_if_missing "$repo_root/.agent-docs/templates/opencode-agent-stack.md" "$opencode_config/opencode-agent-stack.md"
 if [ ! -f "$opencode_config/tui.json" ]; then
     write_file "$opencode_config/tui.json" '{ "plugin": ["oh-my-openagent/tui"] }'
 else

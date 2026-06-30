@@ -390,23 +390,82 @@ EOF
 }
 
 ensure_opencode_config() {
-    local config_dir template
+    local config_dir template stack_template omo_template json jsonc omo_json omo_jsonc stamp
     config_dir="/root/.config/opencode"
     template="$TARGET_PATH/.agent-docs/templates/opencode-global.example.jsonc"
+    stack_template="$TARGET_PATH/.agent-docs/templates/opencode-agent-stack.md"
+    omo_template="$TARGET_PATH/.agent-docs/templates/oh-my-openagent.example.jsonc"
+    json="$config_dir/opencode.json"
+    jsonc="$config_dir/opencode.jsonc"
+    omo_json="$config_dir/oh-my-openagent.json"
+    omo_jsonc="$config_dir/oh-my-openagent.jsonc"
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     if [ "$DRY_RUN" -eq 1 ]; then
         log "[dry-run] ensure $config_dir"
     else
         mkdir -p "$config_dir"
     fi
 
-    if [ ! -f "$config_dir/opencode.jsonc" ] && [ ! -f "$config_dir/opencode.json" ] && [ -f "$template" ]; then
+    if [ -f "$jsonc" ] && [ -f "$json" ]; then
+        backup_file "$jsonc"
         if [ "$DRY_RUN" -eq 1 ]; then
-            log "[dry-run] copy $template -> $config_dir/opencode.jsonc"
+            log "[dry-run] archive conflicting $jsonc -> $jsonc.disabled-by-omo-$stamp"
         else
-            cp "$template" "$config_dir/opencode.jsonc"
+            mv "$jsonc" "$jsonc.disabled-by-omo-$stamp"
         fi
+    fi
+
+    if [ ! -f "$json" ] && [ ! -f "$jsonc" ] && [ -f "$template" ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "[dry-run] copy $template -> $json"
+        else
+            cp "$template" "$json"
+        fi
+    elif [ -f "$json" ]; then
+        log "OpenCode config is present: $json"
+    elif [ -f "$jsonc" ]; then
+        log "OpenCode JSONC config is present: $jsonc"
     else
-        log "OpenCode config is present or no template is available yet."
+        warn "OpenCode config template is not available: $template"
+    fi
+
+    if [ -f "$omo_json" ] && [ -f "$omo_jsonc" ]; then
+        backup_file "$omo_jsonc"
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "[dry-run] archive conflicting $omo_jsonc -> $omo_jsonc.disabled-by-omo-$stamp"
+        else
+            mv "$omo_jsonc" "$omo_jsonc.disabled-by-omo-$stamp"
+        fi
+    fi
+
+    if [ ! -f "$omo_json" ] && [ ! -f "$omo_jsonc" ] && [ -f "$omo_template" ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "[dry-run] copy $omo_template -> $omo_json"
+        else
+            cp "$omo_template" "$omo_json"
+        fi
+    elif [ -f "$omo_json" ]; then
+        log "Oh My OpenAgent config is present: $omo_json"
+    elif [ -f "$omo_jsonc" ]; then
+        log "Oh My OpenAgent JSONC config is present: $omo_jsonc"
+    else
+        warn "Oh My OpenAgent config template is not available: $omo_template"
+    fi
+
+    if [ -f "$stack_template" ] && [ ! -f "$config_dir/opencode-agent-stack.md" ]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+            log "[dry-run] copy $stack_template -> $config_dir/opencode-agent-stack.md"
+        else
+            cp "$stack_template" "$config_dir/opencode-agent-stack.md"
+        fi
+    fi
+
+    if [ ! -f "$config_dir/tui.json" ]; then
+        write_generated_file "$config_dir/tui.json" <<'EOF'
+{
+  "plugin": ["oh-my-openagent/tui"]
+}
+EOF
     fi
 }
 

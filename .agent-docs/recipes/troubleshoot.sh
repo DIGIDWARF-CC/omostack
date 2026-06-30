@@ -5,6 +5,15 @@ set -uo pipefail
 
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 
+active_opencode_config() {
+    local config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+    if [ -f "$config_dir/opencode.json" ]; then
+        printf '%s\n' "$config_dir/opencode.json"
+    elif [ -f "$config_dir/opencode.jsonc" ]; then
+        printf '%s\n' "$config_dir/opencode.jsonc"
+    fi
+}
+
 show_menu() {
     echo "=== Omostack Troubleshooter ==="
     echo ""
@@ -90,14 +99,12 @@ fix_opencode_not_in_path() {
 fix_ohmyopenagent_fails() {
     echo ""
     echo "--- oh-my-openagent doctor fails ---"
-    local issues=0
-
     # Check global install
     if ! command -v oh-my-openagent &>/dev/null; then
         echo "❌ oh-my-openagent not globally installed"
-        read -rp "Run: npm install -g oh-my-openagent? [Y/n] " confirm
+        read -rp "Run: npm install -g oh-my-openagent@4.11.1? [Y/n] " confirm
         if [[ "${confirm:-Y}" != [Nn]* ]]; then
-            npm install -g oh-my-openagent 2>&1 | tail -5
+            npm install -g oh-my-openagent@4.11.1 2>&1 | tail -5
         fi
     fi
 
@@ -114,8 +121,10 @@ fix_ohmyopenagent_fails() {
     fi
 
     # Check opencode config plugin entry
-    if [ -f "$xdg/opencode.jsonc" ] && ! grep -q '"oh-my-openagent"' "$xdg/opencode.jsonc"; then
-        echo "⚠ Plugin entry missing from opencode.jsonc"
+    local opencode_config
+    opencode_config="$(active_opencode_config)"
+    if [ -n "$opencode_config" ] && ! grep -q '"oh-my-openagent"' "$opencode_config"; then
+        echo "⚠ Plugin entry missing from $opencode_config"
     fi
 
     echo ""
@@ -190,9 +199,11 @@ fix_tui_missing() {
         fi
     fi
 
-    # Also check opencode.jsonc has plugin entry
-    if [ -f "$xdg/opencode.jsonc" ] && ! grep -q '"oh-my-openagent"' "$xdg/opencode.jsonc"; then
-        echo "⚠ Also add to opencode.jsonc:"
+    # Also check the active OpenCode config for the plugin entry.
+    local opencode_config
+    opencode_config="$(active_opencode_config)"
+    if [ -n "$opencode_config" ] && ! grep -q '"oh-my-openagent"' "$opencode_config"; then
+        echo "⚠ Also add to $opencode_config:"
         echo '   "plugin": ["oh-my-openagent"]'
     fi
 }
@@ -211,8 +222,7 @@ fix_provider_auth() {
     echo ""
     echo "Common fixes:"
     echo "  • Re-authenticate through OpenCode desktop: opencode auth login <provider>"
-    echo "  • Verify model id in opencode.jsonc matches provider's actual model"
-    echo "  • Check LM Studio server is running and accessible"
+    echo "  • Verify the model id in opencode.json (or compatible JSONC) matches the provider"
     echo ""
     echo "For detailed guide: .agent-docs/provider-auth.md"
 }
