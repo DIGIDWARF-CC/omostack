@@ -98,6 +98,7 @@ See `.agent-docs/README.md` for the complete navigation map.
 | `bootstrap-for-human/omo_host_bootstrap.cmd` | Windows host bootstrapper for humans |
 | `bootstrap-for-human/omo_bootstrap.sh` | Root-only Ubuntu WSL stage called by the host bootstrapper |
 | `bootstrap-for-human-light/` | Self-contained light package with the same entry points |
+| `bootstrap-for-human*/omo_cleanup.cmd` | Bilingual destructive WSL/OmOStack removal script |
 | `.agent-docs/recipes/troubleshoot.sh` | Interactive troubleshooting menu |
 | `.agent-docs/templates/` | Sanitized OpenCode / oh-my-openagent examples |
 | `.my-omo/remote-access/` | Canonical ignored folder for real remote-access keys and local pseudoconfigs |

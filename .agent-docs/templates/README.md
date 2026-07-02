@@ -29,3 +29,5 @@ Files:
 | `cleanup-temp.sh` | Remove old temp files from ignored dirs |
 | `diagnostic.sh` | Sanitized JSON diagnostic for agent troubleshooting |
 | `build-bootstrap-packages.sh` | Synchronize profile variants and rebuild both delivery ZIP files |
+
+Each delivery ZIP contains `omo_host_bootstrap.cmd`, `omo_bootstrap.sh`, and the identical destructive `omo_cleanup.cmd`.

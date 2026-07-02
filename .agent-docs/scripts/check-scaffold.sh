@@ -47,14 +47,18 @@ run_templates() {
         assert_file "$f"
     done
     assert_not_contains ".agent-docs/templates/oh-my-openagent.example.jsonc" "ghp_"
+    assert_not_contains ".agent-docs/templates/opencode-agent-stack.md" "## OmO Agent Roles"
+    assert_not_contains ".agent-docs/templates/opencode-agent-stack.md" "heavy agentic work"
 }
 
 run_script_safety() {
     assert_file "bootstrap-for-human/omo_host_bootstrap.cmd"
     assert_file "bootstrap-for-human/omo_bootstrap.sh"
+    assert_file "bootstrap-for-human/omo_cleanup.cmd"
     assert_file "bootstrap-for-human/Opencode-wsl-setup.zip"
     assert_file "bootstrap-for-human-light/omo_host_bootstrap.cmd"
     assert_file "bootstrap-for-human-light/omo_bootstrap.sh"
+    assert_file "bootstrap-for-human-light/omo_cleanup.cmd"
     assert_file "bootstrap-for-human-light/Opencode-wsl-light-setup.zip"
     assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "cscript.exe"
     assert_contains "bootstrap-for-human/omo_host_bootstrap.cmd" "wscript.exe"
@@ -94,7 +98,9 @@ run_script_safety() {
     local cmd_file jscript_tmp
     for cmd_file in \
         "${repo_root}/bootstrap-for-human/omo_host_bootstrap.cmd" \
-        "${repo_root}/bootstrap-for-human-light/omo_host_bootstrap.cmd"; do
+        "${repo_root}/bootstrap-for-human-light/omo_host_bootstrap.cmd" \
+        "${repo_root}/bootstrap-for-human/omo_cleanup.cmd" \
+        "${repo_root}/bootstrap-for-human-light/omo_cleanup.cmd"; do
         jscript_tmp="$(mktemp --suffix=.js)"
         awk '{
             sub(/\r$/, "")
@@ -171,13 +177,23 @@ light = root / "bootstrap-for-human-light"
 
 full_cmd = (full / "omo_host_bootstrap.cmd").read_bytes()
 light_cmd = (light / "omo_host_bootstrap.cmd").read_bytes()
+full_cleanup = (full / "omo_cleanup.cmd").read_bytes()
+light_cleanup = (light / "omo_cleanup.cmd").read_bytes()
 full_sh = (full / "omo_bootstrap.sh").read_text()
 light_sh = (light / "omo_bootstrap.sh").read_text()
 
 assert b"\n" not in full_cmd.replace(b"\r\n", b"")
 assert b"\n" not in light_cmd.replace(b"\r\n", b"")
+assert b"\n" not in full_cleanup.replace(b"\r\n", b"")
+assert b"\n" not in light_cleanup.replace(b"\r\n", b"")
 assert "\r" not in full_sh
 assert "\r" not in light_sh
+assert full_cleanup == light_cleanup
+full_cleanup.decode("utf-8")
+assert not full_cleanup.startswith(b"\xef\xbb\xbf")
+assert b"chcp 65001" in full_cleanup
+assert "I AGREE TO DELETE MY WSL COMPLETELY".encode() in full_cleanup
+assert "ВНИМАНИЕ".encode("utf-8") in full_cleanup
 
 normalized_full_cmd = full_cmd.replace(b'set "PROFILE=full"', b'set "PROFILE=PROFILE"')
 normalized_light_cmd = light_cmd.replace(b'set "PROFILE=light"', b'set "PROFILE=PROFILE"')
@@ -193,7 +209,7 @@ packages = (
 )
 for directory, archive_name in packages:
     with zipfile.ZipFile(directory / archive_name) as zf:
-        assert zf.namelist() == ["omo_host_bootstrap.cmd", "omo_bootstrap.sh"]
+        assert zf.namelist() == ["omo_host_bootstrap.cmd", "omo_bootstrap.sh", "omo_cleanup.cmd"]
         for name in zf.namelist():
             assert zf.read(name) == (directory / name).read_bytes()
 PY

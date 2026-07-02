@@ -16,6 +16,8 @@
 *.tmp
 *.bak
 *.zip
+!/bootstrap-for-human/Opencode-wsl-setup.zip
+!/bootstrap-for-human-light/Opencode-wsl-light-setup.zip
 *.rar
 *.tar*
 *.gz*

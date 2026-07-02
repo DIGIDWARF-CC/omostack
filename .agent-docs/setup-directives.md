@@ -165,7 +165,15 @@ git check-ignore -v .my-omo/remote-access/example.local.jsonc
 5. Check upstream release notes when changing OpenCode or oh-my-openagent versions.
 6. Rerun `check-health.sh --dry-run`, `check-config.sh --dry-run`, and the relevant full-profile doctor commands.
 
-## 12. Escalation
+The host installer force-synchronizes the tracked checkout to the remote default branch on every install/repair run. Repository-managed instructions are delivery-owned; keep machine-private state only in ignored `.my-omo` and runtime state in `.omo`.
+
+## 12. Destructive Uninstall
+
+`bootstrap-for-human/omo_cleanup.cmd` and its identical light-package copy remove all WSL distributions, WSL components, OmOStack host state, and the checkout. This is intentionally broader than a profile rollback.
+
+The operator must back up important Linux files/services and enter `I AGREE TO DELETE MY WSL COMPLETELY` exactly. Never bypass this confirmation.
+
+## 13. Escalation
 
 Consult Oracle/review agents when:
 - a repair would delete or rewrite global config;

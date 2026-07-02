@@ -373,6 +373,7 @@ ensure_repo_install() {
     parent="$(dirname "$TARGET_PATH")"
     if [ -d "$TARGET_PATH/.git" ]; then
         log "OmO repository already exists: $TARGET_PATH"
+        sync_repo_checkout
         return 0
     fi
     if [ -e "$TARGET_PATH" ] && [ "$(find "$TARGET_PATH" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
@@ -380,6 +381,7 @@ ensure_repo_install() {
     fi
     run "Create OmO parent directory" mkdir -p "$parent"
     run "Clone OmO repository" git clone "$REPO_URL" "$TARGET_PATH"
+    sync_repo_checkout
 }
 
 require_repo_for_repair() {
@@ -387,6 +389,41 @@ require_repo_for_repair() {
         die "Repair mode requires an existing OmO git checkout at $TARGET_PATH. Run install first."
     fi
     log "OmO repository present: $TARGET_PATH"
+    sync_repo_checkout
+}
+
+sync_repo_checkout() {
+    local remote_ref candidate
+    if [ "$DRY_RUN" -eq 1 ]; then
+        log "[dry-run] force-sync $TARGET_PATH to the default branch of $REPO_URL"
+        log "[dry-run] preserve ignored/private .my-omo and runtime .omo directories"
+        return 0
+    fi
+    [ -d "$TARGET_PATH/.git" ] || die "Cannot synchronize a non-git target: $TARGET_PATH"
+
+    if git -C "$TARGET_PATH" remote get-url origin >/dev/null 2>&1; then
+        run "Set OmO origin URL" git -C "$TARGET_PATH" remote set-url origin "$REPO_URL"
+    else
+        run "Add OmO origin URL" git -C "$TARGET_PATH" remote add origin "$REPO_URL"
+    fi
+    run "Fetch current OmO delivery" git -C "$TARGET_PATH" fetch --prune origin
+    if ! try_run "Refresh OmO origin default branch" git -C "$TARGET_PATH" remote set-head origin --auto; then
+        warn "Could not refresh origin/HEAD; using a verified remote branch."
+    fi
+
+    remote_ref="$(git -C "$TARGET_PATH" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+    if [ -z "$remote_ref" ]; then
+        for candidate in origin/main origin/master; do
+            if git -C "$TARGET_PATH" rev-parse --verify --quiet "$candidate^{commit}" >/dev/null; then
+                remote_ref="$candidate"
+                break
+            fi
+        done
+    fi
+    [ -n "$remote_ref" ] || die "Cannot determine the remote default branch for $REPO_URL."
+
+    run "Reset OmO checkout to $remote_ref" git -C "$TARGET_PATH" reset --hard "$remote_ref"
+    run "Remove unmanaged checkout files" git -C "$TARGET_PATH" clean -fd -e .my-omo -e .omo
 }
 
 discover_opencode() {
@@ -554,9 +591,12 @@ ensure_opencode_config() {
         warn "Oh My OpenAgent config template is not available: $omo_template"
     fi
 
-    if [ -f "$stack_template" ] && [ ! -f "$config_dir/opencode-agent-stack.md" ]; then
+    if cmp -s "$stack_template" "$config_dir/opencode-agent-stack.md" 2>/dev/null; then
+        log "OpenCode agent instructions already match the delivery template."
+    else
+        backup_file "$config_dir/opencode-agent-stack.md"
         if [ "$DRY_RUN" -eq 1 ]; then
-            log "[dry-run] copy $stack_template -> $config_dir/opencode-agent-stack.md"
+            log "[dry-run] synchronize $stack_template -> $config_dir/opencode-agent-stack.md"
         else
             cp "$stack_template" "$config_dir/opencode-agent-stack.md"
         fi

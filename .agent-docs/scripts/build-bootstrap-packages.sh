@@ -17,9 +17,11 @@ light_dir.mkdir(parents=True, exist_ok=True)
 
 cmd_name = "omo_host_bootstrap.cmd"
 shell_name = "omo_bootstrap.sh"
+cleanup_name = "omo_cleanup.cmd"
 
 full_cmd = (full_dir / cmd_name).read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
 full_shell = (full_dir / shell_name).read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+full_cleanup = (full_dir / cleanup_name).read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
 
 if full_cmd.count('set "PROFILE=full"') != 1:
     raise SystemExit("full CMD must contain exactly one full profile default")
@@ -30,7 +32,9 @@ light_cmd = full_cmd.replace('set "PROFILE=full"', 'set "PROFILE=light"')
 light_shell = full_shell.replace('DEFAULT_PROFILE="full"', 'DEFAULT_PROFILE="light"')
 
 (full_dir / cmd_name).write_bytes(full_cmd.replace("\n", "\r\n").encode("utf-8"))
+(full_dir / cleanup_name).write_bytes(full_cleanup.replace("\n", "\r\n").encode("utf-8"))
 (light_dir / cmd_name).write_bytes(light_cmd.replace("\n", "\r\n").encode("utf-8"))
+(light_dir / cleanup_name).write_bytes(full_cleanup.replace("\n", "\r\n").encode("utf-8"))
 (light_dir / shell_name).write_text(light_shell, encoding="utf-8", newline="\n")
 (light_dir / shell_name).chmod(0o755)
 
@@ -38,7 +42,7 @@ light_shell = full_shell.replace('DEFAULT_PROFILE="full"', 'DEFAULT_PROFILE="lig
 def write_zip(directory: Path, archive_name: str) -> None:
     archive = directory / archive_name
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
-        for name, mode in ((cmd_name, 0o644), (shell_name, 0o755)):
+        for name, mode in ((cmd_name, 0o644), (shell_name, 0o755), (cleanup_name, 0o644)):
             payload = (directory / name).read_bytes()
             # ZIP's 1980 epoch makes release archives reproducible across checkouts.
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))

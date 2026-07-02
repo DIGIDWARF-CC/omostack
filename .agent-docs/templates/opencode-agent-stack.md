@@ -35,27 +35,10 @@ This file documents only the capabilities enabled by `/root/.config/opencode/ope
 - Use Playwright MCP for browser automation and visual validation when UI behavior or screenshots matter.
 - Do not assume other MCP servers exist unless `/config` shows them for the current project.
 
-## Configured OpenCode Agents
+## Delivery-Specific OpenCode Agents
 
-- Built-in agents intentionally kept available in `opencode.json`: `build`, `plan`, `general`.
-- With OmO 4.11.1 active, `plan` and `general` remain primary, while the literal built-in `build` is kept as a subagent by the plugin.
-- OmO's primary builder replacement is `OpenCode-Builder`.
 - `title` is disabled to avoid wasting model calls on session title generation.
 - Custom subagents from `opencode.json`: `wsl-interop`, `powershell-agent`.
-
-## OmO Agent Roles
-
-- `sisyphus`: heavy agentic work and persistence loops.
-- `hephaestus`: deep implementation and engineering assembly.
-- `prometheus`: planning, decomposition, and pre-implementation analysis.
-- `atlas`: approved plan execution and coordination.
-- `oracle`: validation, review, risk analysis, contradiction checks.
-- `librarian`: documentation, references, and research tasks.
-- `explore`: read-only codebase exploration.
-- `multimodal-looker`: screenshots, UI, and image inspection.
-- `metis`: architecture and alternative approaches.
-- `momus`: critique, weak-spot finding, false-assumption checks.
-- `sisyphus-junior`: small isolated tasks.
 
 ## Windows and WSL Interop
 

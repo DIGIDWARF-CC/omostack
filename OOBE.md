@@ -82,6 +82,7 @@ into the Ubuntu stage or creating a bogus portproxy.
 1. Refuses to run outside Ubuntu WSL or when `/etc/wsl.conf` is missing.
 2. Keeps the install root-only: `/etc/wsl.conf` sets `default=root`; OpenCode config/state live under `/root`.
 3. Installs Ubuntu base packages, clones `https://github.com/DIGIDWARF-CC/omostack.git` when needed, and installs OpenCode through the official installer.
+   On every later install/repair run, the checkout is fetched, hard-reset to the remote default branch, and cleaned of unmanaged files. Ignored `.my-omo` and `.omo` state is preserved.
 4. Creates `/usr/local/bin/opencode` as a managed symlink.
 5. Installs the selected managed config without overwriting unmarked user config.
 6. Starts `opencode serve --hostname 0.0.0.0 --port 4096` through systemd or a one-shot fallback.
@@ -108,6 +109,20 @@ Build both folders and ZIP files with:
 ```
 
 The static scaffold check verifies Bash/JScript/JSON syntax, CRLF/LF line endings, that full/light script pairs differ only by their default profile, and that both ZIP payloads exactly match current scripts. It does not execute OOBE.
+
+## Destructive Cleanup
+
+Both delivery folders and ZIP files contain `omo_cleanup.cmd`. Run it as administrator only when WSL and OmOStack must be completely removed.
+
+The cleanup:
+
+- requires the exact phrase `I AGREE TO DELETE MY WSL COMPLETELY`;
+- unregisters every WSL distribution and destroys its files and services;
+- removes the modern WSL package/update where supported, then disables/removes the WSL and Virtual Machine Platform features;
+- deletes `.wslconfig`, the OmO keep-alive task, portproxy, host bootstrap state, and `C:\AI\omostack`;
+- keeps the console open and writes `%TEMP%\omo-cleanup.log`.
+
+Back up all important WSL data before confirmation. A Windows restart is required afterward.
 
 ## Diagnostics
 
